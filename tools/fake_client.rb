@@ -2,8 +2,10 @@
 require 'socket'
 
 hostname = "127.0.0.1"
+portfile = RUBY_PLATFORM.split('-')[1] == "linux" ? "/tmp/unisocket_port" : "unisocket_port"
 begin
-	port = File::open("/tmp/unisocket_port").read().to_i
+	port = File::open(portfile).read().to_i
+	puts "Opened port file"
 rescue Errno::ENOENT
 	puts "Could not open port file. Is the service running?"
 	exit

@@ -10,6 +10,7 @@ import socket		# `socket.socket`
 import queue		# `queue.Queue`, `queue.Empty`
 import logging		# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler`
 import logging.handlers	# `logging.handlers.RotatingFileHandler`
+import os			# `os.name`
 
 # Some constants
 # Network Protocol Constants
@@ -53,6 +54,7 @@ class Peer:
 		self.version = -1
 		self.running = True
 		self.verbinfo = verbinfo
+		self.datalock = threading.Lock()
 
 # Model of UniSocket P2P client
 # Should be tweaked/inherited to be modified
@@ -95,8 +97,10 @@ class UnisocketModel:
 		self.logger.addHandler(console)
 
 		# Create the file handler.
-		# FIXME: On os.platform() == __windows__, don't use /tmp
-		file_lo = logging.handlers.RotatingFileHandler(filename = "/tmp/unisocket_logs")
+		logfile = "unisocket_logs"
+		if os.name == "posix":
+			logfile = "/tmp/unisocket_logs"
+		file_lo = logging.handlers.RotatingFileHandler(filename = logfile)
 		file_lo.setLevel(logging.DEBUG)
 		f_formatter = logging.Formatter('[%(asctime)s][%(levelname)7s][%(name)20s:%(funcName)25s:%(lineno)3s][%(threadName)10s] %(message)s')
 		file_lo.setFormatter(f_formatter)
@@ -116,15 +120,22 @@ class UnisocketModel:
 		sock.settimeout(0)
 		self.logger.debug("Started peer {0}".format(pid))
 		peer = self.peers[pid] # Peer object access is faster
-		while peer.running:
+		while peer.running or peer.oqueue != b"":
+			peer.datalock.acquire()
 			# If output must be sent, then so be it
 			if len(peer.oqueue) > 0:
-				sock.send(peer.oqueue)
+				try:
+					sock.send(peer.oqueue)
+				except BrokenPipeError:
+					self.logger.warning("BROKEN Pipe! Connection with peer {0} broken".format(pid))
+					peer.datalock.release()
+					break
 				self.logger.debug("[{0}] << {1}".format(pid, peer.oqueue))
 				peer.oqueue = b""
 
 			# No iqueue means we're being deleted; no need to recv, or parse
 			if peer.iqueue == None:
+				peer.datalock.release()
 				continue
 
 			# Create the Differed Delta Frame, fancy word for "Data that's new"
@@ -133,15 +144,21 @@ class UnisocketModel:
 				ddf += sock.recv(1024)
 			except BlockingIOError:
 				pass
+			except ConnectionResetError:
+				self.logger.warning("Connection Reset with Peer {0}".format(pid))
+				peer.datalock.release()
+				break
 
 			# No news is good news
 			if ddf == b"":
+				peer.datalock.release()
 				continue
 
 			peer.iqueue += ddf
 			self.logger.debug("[{0}] >> {1}".format(pid, ddf))
 
 			self.parse_packets(pid)
+			peer.datalock.release()
 
 		sock.close()
 		# Only the UniSocket Peer Thread of a specific Peer can eventually erase itself
@@ -216,13 +233,17 @@ class UnisocketModel:
 				continue
 
 			npid = self.peer_add(pinfo, psock)
-			self.peers[npid].thread.start()
+		self.listen_socket.shutdown(socket.SHUT_RDWR)
+		self.listen_socket.close()
 		self.logger.debug("Stopped")
 
 	def peer_add(self, verbinfo, sock = None):
 		"""Add a peer, either from an info tuple, or an info tuple and a socket.
 		If the socket is None, then this means initiating a connection, creating sock,
 		connecting it, and eventually creating and storing the informations of the peer."""
+		if not self.running:
+			return False
+
 		# New PeerID
 		npid = 0
 		while self.peer_get(npid):
@@ -244,7 +265,8 @@ class UnisocketModel:
 			name = "Peer::{0}".format(npid)
 		)
 
-		self.peers[npid] = Peer(npid, trd)
+		self.peers[npid] = Peer(npid, trd, verbinfo)
+		self.peers[npid].thread.start()
 		return npid
 
 	def peer_del(self, pid):
@@ -253,9 +275,11 @@ class UnisocketModel:
 		if not peer:
 			return
 
+		peer.datalock.acquire()
 		peer.iqueue = None # Drop all data
 		peer.running = False # Stop the peer's thread
-
+		peer.oqueue += i2b(GOODBYE_BYTE)
+		peer.datalock.release()
 
 	def peer_get(self, npid):
 		return self.peers.get(npid, None)
@@ -334,12 +358,11 @@ class UnisocketModel:
 
 		# Summoning the peers for deletion. We may not want to wait for them to
 		# end but at the same time we can't safely parse the list, since it may
-		# change size during execution. We'll just remember what peers we shut down.
-		# Other thing that sucks : indices may not be linear, and iterating over keys just sucks.
-		dunzo = []
-		while len(self.peers) - len(dunzo) > 0:
-			neox = [x for x in self.peers.keys() if not x in dunzo][0]
-			self.peer_get(neox).oqueue += i2b(GOODBYE_BYTE)
-			self.peer_del(neox)
-			dunzo.append(neox)
+		# change size during execution. We'll just take all indices right now, since the listener stopped,
+		# and, for each peer, initiate its deletion.
+		peers = list(self.peers.keys())
+		for pid in peers:
+			if self.peers.get(pid, None) == None:
+				continue
+			self.peer_del(pid)
 		self.logger.debug("Stopped")
