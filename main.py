@@ -1,19 +1,44 @@
 #!/usr/bin/python3
 
-from unisocket import UnisocketModel
+from unisocket import UnisocketModel, i2b, b2i
 import threading
 import random
 import socket
 import os
 
 class Stolas:
-	def __init__(self, port = random.randrange(1025, 65536)):
-		self.port = port
+	def __init__(self, port = None):
+		self.port = port if port != None else random.randrange(1024, 65536)
 
 		self.networker = UnisocketModel(self.port, "STOLAS")
 		self.networker.start()
 
-if __name__ == "__main__":
+import time
+
+def test_encoders():
+	for e in range(1024, 65536):
+		encoded = i2b(e)
+		assert(len(encoded) < 3)
+		print(encoded, end = "\r")
+		decoded = b2i(encoded)
+		try:
+			assert(decoded == e)
+		except AssertionError:
+			print()
+			print(decoded)
+			print(e)
+			raise
+		#time.sleep(0.1)
+	print("Encoders and decoders OK \u2713")
+
+def __send_shutdown(obj):
+	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	s.connect(('127.0.0.1', obj.port))
+	s.send(obj.networker.death_sequence + b"\x02")
+	s.close()
+	print("Network is about to collapse...")
+
+def test_network():
 	logfile, portfile = "/tmp/unisocket_logs", "/tmp/unisocket_port"
 	if os.name == "nt":
 		# Windows
@@ -51,12 +76,29 @@ if __name__ == "__main__":
 
 		models.append(n)
 
-	print("\nReady")
+	print("\nReadying...")
+	tr = threading.Timer(random.randrange(1, 10), lambda: __send_shutdown(eh))
+	tr.start()
+	print("Ready!")
 	eh.networker.join()
 	print("Now killing all models")
 	for obj in models:
 		obj.stop()
-		if obj.is_alive():
-			obj.join()
+		obj.join()
+
+	time.sleep(3)
 	print("Stopped")
+	assert(threading.active_count() == 1)
 	os.remove(portfile)
+
+def create_ponderation(ran):
+	d = []
+	for e in range(ran)[::-1]:
+		d += [e+1] * (ran-e)
+	return d
+
+
+if __name__ == "__main__":
+	test_encoders()
+	for e in range(random.choice(create_ponderation(10))):
+		test_network()

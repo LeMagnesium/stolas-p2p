@@ -11,6 +11,7 @@ import queue		# `queue.Queue`, `queue.Empty`
 import logging		# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler`
 import logging.handlers	# `logging.handlers.RotatingFileHandler`
 import os			# `os.name`
+import random		# `random.randrange`, `random.choice`
 
 # Some constants
 # Network Protocol Constants
@@ -21,22 +22,24 @@ REQUESTPEER_BYTE = 4
 MESSAGE_BYTE = 5
 MESSAGEACK_BYTE = 6
 MALFORMED_DATA = 7
+ADVERTISE_BYTE = 8
 DEATH_SEQUENCE = b"\x57\x68\x61\x74\x20\x69\x73\x20\x6c\x6f\x76\x65\x3f\x20\x42\x61\x62\x79\x20\x64\x6f\x6e\x27\x74\x20\x68\x75\x72\x74\x20\x6d\x65\x2c\x20\x64\x6f\x6e\x27\x74\x20\x68\x75\x72\x74\x20\x6d\x65\x2c\x20\x6e\x6f\x20\x6d\x6f\x72\x65"
 
 # Some conversion things
 def i2b(n):
-	"""Integer to Bytes"""
+	"""Integer to Bytes (Big Endian)"""
 	if n == 0:
 		return b"\0"
 	b = b""
 	while n > 0:
 		neon = n & 255
-		b += chr(neon).encode("utf8")
+		# Latin is used so that we have the whole [0;256[ range for ourselves
+		b = chr(neon).encode("latin") + b
 		n = n >> 8
 	return b
 
 def b2i(b):
-	"""Bytes to Integers"""
+	"""Bytes to Integers (Big Endian)"""
 	n = 0
 	for bt in b:
 		n += bt
@@ -54,6 +57,7 @@ class Peer:
 		self.version = -1
 		self.running = True
 		self.verbinfo = verbinfo
+		self.listen = None
 		self.datalock = threading.Lock()
 
 # Model of UniSocket P2P client
@@ -68,6 +72,8 @@ class UnisocketModel:
 		self.possible_peers = []
 		self.name = name
 
+		self.peerlock = threading.Lock()
+
 		self.__logging_setup()
 
 		self.death_sequence = DEATH_SEQUENCE
@@ -81,6 +87,9 @@ class UnisocketModel:
 			name = "Processor" + self.__nametag()
 		)
 
+		self.timers = {
+			"integration": 0
+		}
 
 	def __nametag(self):
 		"""Return the nametag for our object, appended to the Thread Name Roots"""
@@ -91,7 +100,7 @@ class UnisocketModel:
 		# Create a console handler
 		self.logger = logging.Logger("UniSocket" + self.__nametag())
 		console = logging.StreamHandler()
-		console.setLevel(logging.INFO)
+		console.setLevel(logging.WARNING)
 		c_formatter = logging.Formatter('%(message)s') # Keep it simple
 		console.setFormatter(c_formatter)
 		self.logger.addHandler(console)
@@ -132,6 +141,9 @@ class UnisocketModel:
 					break
 				self.logger.debug("[{0}] << {1}".format(pid, peer.oqueue))
 				peer.oqueue = b""
+			elif not peer.running:
+				peer.datalock.release()
+				break
 
 			# No iqueue means we're being deleted; no need to recv, or parse
 			if peer.iqueue == None:
@@ -163,7 +175,9 @@ class UnisocketModel:
 		sock.close()
 		# Only the UniSocket Peer Thread of a specific Peer can eventually erase itself
 		# That ensures we never run into a situation where a semi-ghost peer thread runs
+		self.peerlock.acquire()
 		del self.peers[pid]
+		self.peerlock.release()
 		self.logger.debug("Stopped")
 
 	def parse_packets(self, peerid):
@@ -185,16 +199,20 @@ class UnisocketModel:
 				data = data[1:]
 
 			elif data[0] == SHAREPEER_BYTE: # Share Peer
-				if len(data) < 8:
+				if len(data) < 2:
 					break
-				if data[1] == 6: #IPV6
-					if len(data) < 6:
-						break
-					self.iqueue.put((data[:6], peerid))
-					data = data[6:]
-				elif data[1] == 4: # IPV4
-					self.iqueue.put((data[:8], peerid))
-					data = data[8:]
+
+				addr_len = data[1]
+				if len(data) < 4 + addr_len:
+					break
+
+				if addr_len > 2: # No address would be so short
+					self.iqueue.put((data[:4+addr_len], peerid))
+				data = data[4+addr_len:]
+
+			elif data[0] == REQUESTPEER_BYTE: # Request Byte
+				self.iqueue.put((b"\x04", peerid))
+				data = data[1:]
 
 			elif data[0] == MESSAGE_BYTE:
 				if len(data) < 3:
@@ -210,6 +228,17 @@ class UnisocketModel:
 			elif data[0] == MALFORMED_DATA:
 				self.iqueue.put((data[0:1], peerid))
 				data = data[1:]
+
+			elif data[0] == ADVERTISE_BYTE:
+				if len(data) < 2:
+					break
+
+				addr_len = data[1]
+				if len(data) < 4 + addr_len:
+					break
+
+				self.iqueue.put((data[:4+addr_len], peerid))
+				data = data[4+addr_len:]
 
 			elif data[0:56] == self.death_sequence:
 				self.logger.warning("Found the Death Sequence")
@@ -237,6 +266,9 @@ class UnisocketModel:
 		self.listen_socket.close()
 		self.logger.debug("Stopped")
 
+	def __advertise(self, peer):
+		peer.oqueue += i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port)
+
 	def peer_add(self, verbinfo, sock = None):
 		"""Add a peer, either from an info tuple, or an info tuple and a socket.
 		If the socket is None, then this means initiating a connection, creating sock,
@@ -244,10 +276,13 @@ class UnisocketModel:
 		if not self.running:
 			return False
 
+		self.peerlock.acquire()
 		# New PeerID
 		npid = 0
 		while self.peer_get(npid):
 			npid += 1
+
+		advertise = True
 
 		# Initiating the connection
 		if sock == None:
@@ -256,17 +291,26 @@ class UnisocketModel:
 				sock.connect(verbinfo)
 			except Exception as e:
 				self.logger.warning("Will not add new Peer : couldn't connect ({0})".format(type(e)))
+				self.peerlock.release()
 				return False
+		else:
+			# We gotta advertise
+			advertise = False
 
 		# New Peer Attached to their Thread
 		trd = threading.Thread(
 			target = self.__peer_both_ways,
 			args = (sock, npid),
-			name = "Peer::{0}".format(npid)
+			name = "Peer::{0}".format(npid) + self.__nametag()
 		)
 
 		self.peers[npid] = Peer(npid, trd, verbinfo)
+		self.peerlock.release()
 		self.peers[npid].thread.start()
+		if advertise:
+			self.__advertise(self.peers[npid])
+			self.peers[npid].listen = verbinfo
+
 		return npid
 
 	def peer_del(self, pid):
@@ -322,6 +366,24 @@ class UnisocketModel:
 	def __processor_unit(self):
 		"""Internal. Processing unit. Must be modified for the handling of packets according to the protocol though."""
 		while self.is_alive():
+			for timer in self.timers:
+				self.timers[timer] -= 1
+
+			# Detect a lack of network integration and ask for peers
+			if len(self.peers) > 0 and len(self.peers) < 3 and self.timers["integration"] <= 0 :
+				if len(self.possible_peers) == 0:
+					self.peerlock.acquire()
+					rpid = random.choice(list(self.peers.keys()))
+					self.peerlock.release()
+					self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
+
+				else:
+					npeer = random.choice(self.possible_peers)
+					if self.peer_add(npeer):
+						self.possible_peers.remove(npeer)
+
+				self.timers["integration"] = random.randrange(10000, 200000)
+
 			try:
 				data, pid = self.iqueue.get(timeout=0)
 			except queue.Empty:
@@ -335,21 +397,54 @@ class UnisocketModel:
 				self.peer_del(pid)
 
 			elif data[0] == SHAREPEER_BYTE: # Peer share byte
-				af_inet = data[1]
+				addr_len = data[1]
 				port = b2i(data[-2:])
 
-				if af_inet == 4:
-					ip = "{0}.{1}.{2}.{3}".format(data[2], data[3], data[4], data[5])
-				elif af_inet == 6:
-					ip = "{0}:{1}:{2}:{3}:{4}:{5}".format(data[2], data[3], data[4], data[5], data[6], data[7])
-				if not (ip, port) in self.possible_peers:
+				ip = data[2:2+addr_len].decode("utf8")
+				if not (ip, port) in self.possible_peers + [peer.verbinfo for peer in list(self.peers.values())]:
 					self.possible_peers.append((ip, port))
+
+			elif data[0] == REQUESTPEER_BYTE:
+				# We were requested a peer, so...
+				peer = None
+				if len(self.peers) == 0:
+					continue
+
+				self.peerlock.acquire()
+				rpid = random.choice(list(self.peers.keys()))
+				peer = self.peer_get(rpid)
+				self.peerlock.release()
+				if peer and rpid != pid and peer.listen != None and peer.iqueue != None:
+					peer.datalock.acquire()
+					verbinfo = peer.listen
+					addr_len = len(verbinfo[0])
+					port = i2b(verbinfo[1])
+					peer.oqueue += i2b(SHAREPEER_BYTE) + i2b(addr_len) + verbinfo[0].encode("utf8") + port
+					peer.datalock.release()
 
 			elif data[0] == MESSAGE_BYTE: # Message Arrival Byte
 				payload_len = b2i(data[1:3])
 				msg = data[3:3+payload_len].decode("utf8")
 				self.logger.info("Received '{0}' from {1}".format(msg, pid))
 				self.peer_get(pid).oqueue += i2b(MESSAGEACK_BYTE) + i2b(payload_len)
+
+			elif data[0] == MESSAGEACK_BYTE: # Message acknowledgement
+				pass # Nothing yet
+
+			elif data[0] == MALFORMED_DATA: # Malformed data alert
+				pass # Nothing yet
+
+			elif data[0] == ADVERTISE_BYTE: # Advertising byte
+				addr_len = data[1]
+				port = b2i(data[-2:])
+
+				ip = data[2:2+addr_len].decode("utf8")
+				peer = self.peer_get(pid)
+
+				listen = (ip if ip != "" else peer.verbinfo[0], port)
+
+				self.peer_get(pid).listen = listen
+				self.logger.info("Peer {0}'s listen is revealed to be {1}".format(pid, listen))
 
 			elif data[0:56] == self.death_sequence: # Death Sequence
 				self.stop()
@@ -360,9 +455,11 @@ class UnisocketModel:
 		# end but at the same time we can't safely parse the list, since it may
 		# change size during execution. We'll just take all indices right now, since the listener stopped,
 		# and, for each peer, initiate its deletion.
+		self.peerlock.acquire()
 		peers = list(self.peers.keys())
 		for pid in peers:
 			if self.peers.get(pid, None) == None:
 				continue
 			self.peer_del(pid)
+		self.peerlock.release()
 		self.logger.debug("Stopped")

@@ -1,4 +1,4 @@
-# Protocol Draft
+# Protocol Draft : V 0x00
 
 ### Important bits of info
  - Since `recv` does not care for the end of the packets we send (since it's a `SOCK_STREAM`, which rightfully contains the word 'stream'), this protocol must be respected in order for the clients to successfully slice and process all packages.
@@ -16,6 +16,7 @@
 |`MESSAGE`|`05`|This is the message package which carries through the payload that will be interpreted by our message client|
 |`MESSAGEACK`|`06`|Send the acknowledgement of a message|
 |`MALFORMEDDATA`|`07`|Alert the peer that we received malformed data that cannot be safely interpreted and was therefore entirely scrapped. Any data sent before that and since the last response should be sent again|
+|`ADVERTISER`|`08`|Advertise the listen port/address of the network model|
 
 ### Hello
  - `u8 version`
@@ -31,17 +32,13 @@
 |`02`|
 
 ### Share Peer
- - `u8 af_inet` : If `4`, then the address is an IPv4 address (see 1st line), if `6`, it's a, IPv6 address (2nd line). Later, a `0` will indicate a domain name (NIY).
- - `u8 ip_addr[af_inet]` : Depending on the previous byte, a byte per byte encoded IP address.
+ - `u8 addr_len` : Length of the address string
+ - `u8 addr[addr_len]` : Address string. Can be a domain name, an IP address (v4, v6). Encoded in UTF-8
  - `u16 port` : Listen port encoded on 2 bytes (0-65535)
- - `u8 domain_len` : If `af_inet` is `0`, then length of the domain name being shared.
- - `char domain[domain_len]` : Encoded domain name string.
 
 |Packet Structure|
 |---|
-|`03`|`04`|`ip_addr[0]`|`ip_addr[1]`|`ip_addr[2]`|`ip_addr[3]`|`port`|`port`|
-|`03`|`06`|`ip_addr[0]`|`ip_addr[1]`|`ip_addr[2]`|`ip_addr[3]`|`ip_addr[4]`|`ip_addr[5]`|`port`|`port`|
-|`03`|`00`|`domain_len`|`domain`|
+|`03`|`addr_len`|`addr[0]`|...|`addr[addr_len-1]`|`port`|`port`|
 
 ### Request Peer
 |Packet Structure|
@@ -68,3 +65,13 @@
 |Packet Structure|
 |---|
 |`07`|`discarded_len`|`discarded_len`|
+
+## Advertiser
+ - `u8 addr_len` : Length of our address string ; when empty, the other party must infer the address it already knows (`verbinfo[0]`)
+ - `u8 addr[addr_len]` : Address encoded byte per byte in `utf-8`
+ - `u16 port` : Port, encoded with `i2b`
+
+
+ |Packet Structure|
+ |---|
+ |`08`|`addr_len`|`addr[0]`|...|`addr[addr_len-1]`|`port`|`port`|
