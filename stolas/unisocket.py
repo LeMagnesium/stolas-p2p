@@ -12,39 +12,11 @@ import logging		# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler`
 import logging.handlers	# `logging.handlers.RotatingFileHandler`
 import os			# `os.name`
 import random		# `random.randrange`, `random.choice`
+import time
 
-# Some constants
-# Network Protocol Constants
-HELLO_BYTE = 1
-GOODBYE_BYTE = 2
-SHAREPEER_BYTE = 3
-REQUESTPEER_BYTE = 4
-MESSAGE_BYTE = 5
-MESSAGEACK_BYTE = 6
-MALFORMED_DATA = 7
-ADVERTISE_BYTE = 8
-DEATH_SEQUENCE = b"\x57\x68\x61\x74\x20\x69\x73\x20\x6c\x6f\x76\x65\x3f\x20\x42\x61\x62\x79\x20\x64\x6f\x6e\x27\x74\x20\x68\x75\x72\x74\x20\x6d\x65\x2c\x20\x64\x6f\x6e\x27\x74\x20\x68\x75\x72\x74\x20\x6d\x65\x2c\x20\x6e\x6f\x20\x6d\x6f\x72\x65"
+from .protocol import *
+from .utils import b2i, i2b
 
-# Some conversion things
-def i2b(n):
-	"""Integer to Bytes (Big Endian)"""
-	if n == 0:
-		return b"\0"
-	b = b""
-	while n > 0:
-		neon = n & 255
-		# Latin is used so that we have the whole [0;256[ range for ourselves
-		b = chr(neon).encode("latin") + b
-		n = n >> 8
-	return b
-
-def b2i(b):
-	"""Bytes to Integers (Big Endian)"""
-	n = 0
-	for bt in b:
-		n += bt
-		n = n << 8
-	return n >> 8
 
 class Peer:
 	"""Representation of the data surrounding a Network Peer"""
@@ -67,12 +39,15 @@ class UnisocketModel:
 	def __init__(self, port, name = None):
 		"""Initialization requires a port and, optionally, a name"""
 		self.port = port
+		self.listen_addr = "127.0.0.1" # Will change later
 		self.running = False
 		self.peers = {}
 		self.possible_peers = []
 		self.name = name
+		self.integrated = False
 
 		self.peerlock = threading.Lock()
+		self.now = time.time()
 
 		self.__logging_setup()
 
@@ -80,6 +55,8 @@ class UnisocketModel:
 
 		self.iqueue = queue.Queue()
 		self.oqueue = queue.Queue()
+
+		self.imessages = queue.Queue()
 
 		self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.processor = threading.Thread(
@@ -111,7 +88,7 @@ class UnisocketModel:
 			logfile = "/tmp/unisocket_logs"
 		file_lo = logging.handlers.RotatingFileHandler(filename = logfile)
 		file_lo.setLevel(logging.DEBUG)
-		f_formatter = logging.Formatter('[%(asctime)s][%(levelname)7s][%(name)20s:%(funcName)25s:%(lineno)3s][%(threadName)10s] %(message)s')
+		f_formatter = logging.Formatter('[%(asctime)s][%(levelname)7s][%(name)20s:%(funcName)25s:%(lineno)3s][%(threadName)20s] %(message)s')
 		file_lo.setFormatter(f_formatter)
 		self.logger.addHandler(file_lo)
 
@@ -122,6 +99,12 @@ class UnisocketModel:
 		self.running = True
 		self.__start_listen() # There might be errors here, so we don't start anything
 		self.processor.start()
+
+	def __is_already_peer(self, verbinfo):
+		return verbinfo == (self.listen_addr, self.port) or verbinfo in (self.peers[peer].listen for peer in self.peers if self.peers[peer].listen != None)
+
+	def __is_already_known(self, verbinfo):
+		return self.__is_already_peer(verbinfo) or verbinfo in self.possible_peers
 
 	def __peer_both_ways(self, sock, pid):
 		"""Internal. Runs the network exchange logic between a Peer and our UniSocket Model."""
@@ -139,6 +122,11 @@ class UnisocketModel:
 					self.logger.warning("BROKEN Pipe! Connection with peer {0} broken".format(pid))
 					peer.datalock.release()
 					break
+				except ConnectionResetError:
+					self.logger.warning("Connection Reset with Peer {0}".format(pid))
+					peer.datalock.release()
+					break
+
 				self.logger.debug("[{0}] << {1}".format(pid, peer.oqueue))
 				peer.oqueue = b""
 			elif not peer.running:
@@ -225,9 +213,17 @@ class UnisocketModel:
 				self.iqueue.put((data[:3+payload_len], peerid))
 				data = data[3 + payload_len:]
 
+			elif data[0] == MESSAGEACK_BYTE:
+				if len(data) < 3:
+					break
+				self.iqueue.put((data[:3], peerid))
+				data = data[3:]
+
 			elif data[0] == MALFORMED_DATA:
-				self.iqueue.put((data[0:1], peerid))
-				data = data[1:]
+				if len(data) < 3:
+					break
+				self.iqueue.put((data[:3], peerid))
+				data = data[3:]
 
 			elif data[0] == ADVERTISE_BYTE:
 				if len(data) < 2:
@@ -241,15 +237,15 @@ class UnisocketModel:
 				data = data[4+addr_len:]
 
 			elif data[0:56] == self.death_sequence:
-				self.logger.warning("Found the Death Sequence")
+				self.logger.info("Found the Death Sequence")
 				self.iqueue.put((self.death_sequence, peerid))
 				data = b""
 
 			else:
-				peer.oqueue += i2b(MALFORMED_DATA) + i2b(len(data))
-				data = b"" # FIXME: Remember to send "MALFORMED_DATA" packet
+				self.peer_send(peerid, i2b(MALFORMED_DATA) + i2b(len(data), 2))
+				data = b""
 
-		peer.iqueue = data # Actualize the data from our modified snapshot
+		peer.iqueue = data # Refresh the data from our modified snapshot
 
 	def __listener_thread(self):
 		"""Listening thread. Responsible for the creation of all Peer Threads."""
@@ -265,9 +261,6 @@ class UnisocketModel:
 		self.listen_socket.shutdown(socket.SHUT_RDWR)
 		self.listen_socket.close()
 		self.logger.debug("Stopped")
-
-	def __advertise(self, peer):
-		peer.oqueue += i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port)
 
 	def peer_add(self, verbinfo, sock = None):
 		"""Add a peer, either from an info tuple, or an info tuple and a socket.
@@ -286,6 +279,11 @@ class UnisocketModel:
 
 		# Initiating the connection
 		if sock == None:
+			if self.__is_already_peer(verbinfo):
+				self.logger.warning("Will not add new Peer : already connected to {0}".format(verbinfo))
+				self.peerlock.release()
+				return False
+
 			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			try:
 				sock.connect(verbinfo)
@@ -308,7 +306,7 @@ class UnisocketModel:
 		self.peerlock.release()
 		self.peers[npid].thread.start()
 		if advertise:
-			self.__advertise(self.peers[npid])
+			self.peer_send(npid, i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port, 2))
 			self.peers[npid].listen = verbinfo
 
 		return npid
@@ -327,6 +325,10 @@ class UnisocketModel:
 
 	def peer_get(self, npid):
 		return self.peers.get(npid, None)
+
+	def peer_count(self):
+		ln = len(self.peers.keys())
+		return ln
 
 	def __start_listen(self):
 		"""Internal. Creates and starts the listen thread after initializing the listen socket and setting some of its properties."""
@@ -363,26 +365,53 @@ class UnisocketModel:
 			pass
 		self.logger.debug("Left the join process")
 
+	def peer_send(self, pid, data):
+		peer = self.peer_get(pid)
+		if peer == None:
+			return False
+
+		peer.oqueue += data
+		return len(data)
+
 	def __processor_unit(self):
 		"""Internal. Processing unit. Must be modified for the handling of packets according to the protocol though."""
+		self.now = time.time()
 		while self.is_alive():
+			then = time.time() - self.now
+			self.now = time.time()
 			for timer in self.timers:
-				self.timers[timer] -= 1
+				self.timers[timer] -= then
 
 			# Detect a lack of network integration and ask for peers
-			if len(self.peers) > 0 and len(self.peers) < 3 and self.timers["integration"] <= 0 :
+			self.peerlock.acquire()
+			pln = self.peer_count()
+			if pln > 0 and pln < 3 and self.timers["integration"] <= 0 :
+				if self.integrated:
+					self.integrated = False
+					self.logger.info("I lost integration!")
+
 				if len(self.possible_peers) == 0:
-					self.peerlock.acquire()
 					rpid = random.choice(list(self.peers.keys()))
-					self.peerlock.release()
 					self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
 
 				else:
 					npeer = random.choice(self.possible_peers)
-					if self.peer_add(npeer):
+					self.peerlock.release()
+					pid = self.peer_add(npeer)
+					self.peerlock.acquire()
+
+					if type(pid) == type(0):
 						self.possible_peers.remove(npeer)
 
-				self.timers["integration"] = random.randrange(10000, 200000)
+				self.timers["integration"] = random.randrange(10, 20)
+				# FIXME: Later : differenciate urgent integration from convenient integration
+
+			elif not self.integrated and pln >= 3:
+				self.logger.info("I became integrated!")
+				self.integrated = True
+
+			self.peerlock.release()
+
 
 			try:
 				data, pid = self.iqueue.get(timeout=0)
@@ -401,38 +430,50 @@ class UnisocketModel:
 				port = b2i(data[-2:])
 
 				ip = data[2:2+addr_len].decode("utf8")
-				if not (ip, port) in self.possible_peers + [peer.verbinfo for peer in list(self.peers.values())]:
+				if not self.__is_already_known((ip, port)):
 					self.possible_peers.append((ip, port))
 
 			elif data[0] == REQUESTPEER_BYTE:
 				# We were requested a peer, so...
 				peer = None
-				if len(self.peers) == 0:
+				if len(self.peers) == 0 or not self.is_alive():
+					# We don't participate in the network if we're gonna shut down
 					continue
 
 				self.peerlock.acquire()
-				rpid = random.choice(list(self.peers.keys()))
+				possibles = [peer for peer in self.peers if self.peers[peer].listen != None]
+				if possibles == []:
+					self.peerlock.release()
+					self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
+					continue
+
+				rpid = random.choice(possibles)
 				peer = self.peer_get(rpid)
 				self.peerlock.release()
-				if peer and rpid != pid and peer.listen != None and peer.iqueue != None:
+				if peer and rpid != pid and peer.iqueue != None:
 					peer.datalock.acquire()
 					verbinfo = peer.listen
-					addr_len = len(verbinfo[0])
-					port = i2b(verbinfo[1])
-					peer.oqueue += i2b(SHAREPEER_BYTE) + i2b(addr_len) + verbinfo[0].encode("utf8") + port
+					addr_len = i2b(len(verbinfo[0]))
+
+					port = i2b(verbinfo[1], 2)
+					self.peer_send(pid, i2b(SHAREPEER_BYTE) + addr_len + verbinfo[0].encode("utf8") + port)
 					peer.datalock.release()
+				else:
+					self.logger.info("Refused to send {0}".format(rpid))
+					self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
 
 			elif data[0] == MESSAGE_BYTE: # Message Arrival Byte
 				payload_len = b2i(data[1:3])
 				msg = data[3:3+payload_len].decode("utf8")
 				self.logger.info("Received '{0}' from {1}".format(msg, pid))
-				self.peer_get(pid).oqueue += i2b(MESSAGEACK_BYTE) + i2b(payload_len)
+				self.imessages.put(("message", msg))
+				self.peer_send(pid, i2b(MESSAGEACK_BYTE) + i2b(payload_len, 2))
 
 			elif data[0] == MESSAGEACK_BYTE: # Message acknowledgement
-				pass # Nothing yet
+				self.imessages.put(("ack", b2i(data[1:])))
 
 			elif data[0] == MALFORMED_DATA: # Malformed data alert
-				pass # Nothing yet
+				self.imessages.put(("malformed", b2i(data[1:])))
 
 			elif data[0] == ADVERTISE_BYTE: # Advertising byte
 				addr_len = data[1]
@@ -444,6 +485,7 @@ class UnisocketModel:
 				listen = (ip if ip != "" else peer.verbinfo[0], port)
 
 				self.peer_get(pid).listen = listen
+				#FIXME: Drop peer if we realize we already had them
 				self.logger.info("Peer {0}'s listen is revealed to be {1}".format(pid, listen))
 
 			elif data[0:56] == self.death_sequence: # Death Sequence

@@ -55,9 +55,11 @@
 |`05`|`payload_len`|`payload_len`|`payload`|
 
 ### Message Acknowledgement
+ - `u16 message_len` : Length of the payload received
+
 |Packet Structure|
 |---|
-|`06`|
+|`06`|`message_len`|`message_len`|
 
 ### Malformed Data
  - `u16 discarded_len` : Length of the discarded input buffer.
