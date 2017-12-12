@@ -5,7 +5,14 @@ pretty_printing = {
 	"s": {"dim": "", "normal": "", "bright": "", "reset_all": ""}
 }
 
-import readline
+try:
+	import readline
+except ImportError:
+	try:
+		import pyreadline as readline
+	except ImportError:
+		pass # Work with absolutely nothing
+
 try:
 	import colorama
 except ImportError:
