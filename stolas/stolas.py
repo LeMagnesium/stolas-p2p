@@ -4,7 +4,7 @@ import threading
 import queue
 import random
 
-import stolas.protocol
+import stolas.protocol as protocol
 from stolas.unisocket import UnisocketModel, i2b, b2i
 
 class Stolas:
@@ -43,6 +43,8 @@ class Stolas:
 				continue
 
 			#print("\n{0}".format(message))
+			if mtype == "message":
+				print(message)
 			self.networker.imessages.task_done()
 
 		print("Shutting down")

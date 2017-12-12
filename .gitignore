@@ -2,3 +2,4 @@ __pycache__/
 stolas.egg-info/
 unisocket_logs
 unisocket_port
+*.ctrl
