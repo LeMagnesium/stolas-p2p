@@ -45,6 +45,7 @@ class UnisocketModel:
 		self.possible_peers = []
 		self.name = name
 		self.integrated = False
+		self.max_clients = 30
 
 		self.peerlock = threading.Lock()
 		self.now = time.time()
@@ -77,7 +78,7 @@ class UnisocketModel:
 		# Create a console handler
 		self.logger = logging.Logger("UniSocket" + self.__nametag())
 		console = logging.StreamHandler()
-		console.setLevel(logging.WARNING)
+		console.setLevel(logging.CRITICAL)
 		c_formatter = logging.Formatter('%(message)s') # Keep it simple
 		console.setFormatter(c_formatter)
 		self.logger.addHandler(console)
@@ -146,6 +147,10 @@ class UnisocketModel:
 				pass
 			except ConnectionResetError:
 				self.logger.warning("Connection Reset with Peer {0}".format(pid))
+				peer.datalock.release()
+				break
+			except ConnectionAbortedError:
+				self.logger.warning("Connection Aborted with Peer {0}".format(pid))
 				peer.datalock.release()
 				break
 
@@ -258,7 +263,10 @@ class UnisocketModel:
 				continue
 
 			npid = self.peer_add(pinfo, psock)
-		self.listen_socket.shutdown(socket.SHUT_RDWR)
+		try:
+			self.listen_socket.shutdown(socket.SHUT_RDWR)
+		except OSError:
+			pass # Happens on Windows when the socket tried to send data
 		self.listen_socket.close()
 		self.logger.debug("Stopped")
 
@@ -385,30 +393,49 @@ class UnisocketModel:
 			# Detect a lack of network integration and ask for peers
 			self.peerlock.acquire()
 			pln = self.peer_count()
-			if pln > 0 and pln < 3 and self.timers["integration"] <= 0 :
-				if self.integrated:
-					self.integrated = False
-					self.logger.info("I lost integration!")
+			if pln > 0:
+				if pln < 3 and self.timers["integration"] <= 0 :
+					if self.integrated:
+						self.integrated = False
+						self.logger.info("I lost integration!")
 
-				if len(self.possible_peers) == 0:
-					rpid = random.choice(list(self.peers.keys()))
-					self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
+					if len(self.possible_peers) == 0:
+						rpid = random.choice(list(self.peers.keys()))
+						self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
 
-				else:
-					npeer = random.choice(self.possible_peers)
-					self.peerlock.release()
-					pid = self.peer_add(npeer)
-					self.peerlock.acquire()
+					else:
+						npeer = random.choice(self.possible_peers)
+						self.peerlock.release()
+						pid = self.peer_add(npeer)
+						self.peerlock.acquire()
 
-					if type(pid) == type(0):
-						self.possible_peers.remove(npeer)
+						if type(pid) == type(0):
+							self.possible_peers.remove(npeer)
 
-				self.timers["integration"] = random.randrange(10, 20)
-				# FIXME: Later : differenciate urgent integration from convenient integration
+					self.timers["integration"] = random.randrange(2, 5)
 
-			elif not self.integrated and pln >= 3:
-				self.logger.info("I became integrated!")
-				self.integrated = True
+				elif pln >= 3 and pln < self.max_clients:
+					if not self.integrated:
+						self.logger.info("I became integrated!")
+						self.integrated = True
+
+					if self.timers["integration"] <= 0:
+						if len(self.possible_peers) == 0:
+							rpid = random.choice(list(self.peers.keys()))
+							self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
+
+						else:
+							npeer = random.choice(self.possible_peers)
+							self.peerlock.release()
+							pid = self.peer_add(npeer)
+							self.peerlock.acquire()
+
+							if type(pid) == type(0):
+								self.possible_peers.remove(npeer)
+
+						dd = 100 # seconds
+						mx = self.max_clients # clients
+						self.timers["integration"] = (lambda x: (dd/(mx**2)) * (x**2))(pln) # x->(dd/mx^2)*x^2
 
 			self.peerlock.release()
 
