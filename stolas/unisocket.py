@@ -302,12 +302,14 @@ class UnisocketModel:
 				self.peerlock.release()
 				return False
 
-			sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			try:
+				sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 				sock.connect(verbinfo)
 			except Exception as e:
-				self.logger.warning("Will not add new Peer : couldn't connect ({0})".format(type(e)))
+				self.logger.warning("Will not add new Peer : couldn't connect to {0} ({1})".format(verbinfo, type(e)))
 				self.peerlock.release()
+				return False
+			except OSError:
 				return False
 		else:
 			# We gotta advertise
