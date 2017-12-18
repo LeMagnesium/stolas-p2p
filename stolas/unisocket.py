@@ -36,38 +36,47 @@ class Peer:
 # Should be tweaked/inherited to be modified
 class UnisocketModel:
 	"""Unisocket Model for the P2P instance of our project."""
-	def __init__(self, port, name = None):
-		"""Initialization requires a port and, optionally, a name"""
+	def __init__(self, port, **kwargs):
+		"""Initialization requires a port and, optionally, a name and the listen option"""
+		# Configuration
 		self.port = port
-		self.listen_addr = "127.0.0.1" # Will change later
+		self.listen = kwargs.get("listen", True)
+		if self.listen:
+			self.listen_addr = "127.0.0.1" # Will change later
+		self.name = kwargs.get("name", None)
+		self.max_clients = 30
+		self.death_sequence = DEATH_SEQUENCE
+
+		# Dynamic status fields
+		self.integrated = False
 		self.running = False
+		self.now = time.time()
+		self.timers = {
+			"integration": 0
+		}
+
+		# Data Storage Structures
 		self.peers = {}
 		self.possible_peers = []
-		self.name = name
-		self.integrated = False
-		self.max_clients = 30
 
+		# Communication Structures
+		self.listen_socket = None
+		if self.listen:
+			self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.iqueue = queue.Queue()
+		self.oqueue = queue.Queue()
+		self.imessages = queue.Queue()
+		self.omessages = queue.Queue()
+
+		# Control Structures
 		self.peerlock = threading.Lock()
-		self.now = time.time()
 
 		self.__logging_setup()
 
-		self.death_sequence = DEATH_SEQUENCE
-
-		self.iqueue = queue.Queue()
-		self.oqueue = queue.Queue()
-
-		self.imessages = queue.Queue()
-
-		self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.processor = threading.Thread(
 			target = self.__processor_unit,
 			name = "Processor" + self.__nametag()
 		)
-
-		self.timers = {
-			"integration": 0
-		}
 
 	def __nametag(self):
 		"""Return the nametag for our object, appended to the Thread Name Roots"""
@@ -114,29 +123,29 @@ class UnisocketModel:
 		self.logger.debug("Started peer {0}".format(pid))
 		peer = self.peers[pid] # Peer object access is faster
 		while peer.running or peer.oqueue != b"":
-			peer.datalock.acquire()
+			self.peer_lock(pid)
 			# If output must be sent, then so be it
 			if len(peer.oqueue) > 0:
 				try:
 					sock.send(peer.oqueue)
 				except BrokenPipeError:
 					self.logger.warning("BROKEN Pipe! Connection with peer {0} broken".format(pid))
-					peer.datalock.release()
+					self.peer_unlock(pid)
 					break
 				except ConnectionResetError:
 					self.logger.warning("Connection Reset with Peer {0}".format(pid))
-					peer.datalock.release()
+					self.peer_unlock(pid)
 					break
 
 				self.logger.debug("[{0}] << {1}".format(pid, peer.oqueue))
 				peer.oqueue = b""
 			elif not peer.running:
-				peer.datalock.release()
+				self.peer_unlock(pid)
 				break
 
 			# No iqueue means we're being deleted; no need to recv, or parse
 			if peer.iqueue == None:
-				peer.datalock.release()
+				self.peer_unlock(pid)
 				continue
 
 			# Create the Differed Delta Frame, fancy word for "Data that's new"
@@ -147,23 +156,23 @@ class UnisocketModel:
 				pass
 			except ConnectionResetError:
 				self.logger.warning("Connection Reset with Peer {0}".format(pid))
-				peer.datalock.release()
+				self.peer_unlock(pid)
 				break
 			except ConnectionAbortedError:
 				self.logger.warning("Connection Aborted with Peer {0}".format(pid))
-				peer.datalock.release()
+				self.peer_unlock(pid)
 				break
 
 			# No news is good news
 			if ddf == b"":
-				peer.datalock.release()
+				self.peer_unlock(pid)
 				continue
 
 			peer.iqueue += ddf
 			self.logger.debug("[{0}] >> {1}".format(pid, ddf))
 
 			self.parse_packets(pid)
-			peer.datalock.release()
+			self.peer_unlock(pid)
 
 		sock.close()
 		# Only the UniSocket Peer Thread of a specific Peer can eventually erase itself
@@ -325,14 +334,26 @@ class UnisocketModel:
 		if not peer:
 			return
 
-		peer.datalock.acquire()
+		self.peer_lock(pid)
 		peer.iqueue = None # Drop all data
 		peer.running = False # Stop the peer's thread
 		peer.oqueue += i2b(GOODBYE_BYTE)
-		peer.datalock.release()
+		self.peer_unlock(pid)
 
 	def peer_get(self, npid):
 		return self.peers.get(npid, None)
+
+	def peer_lock(self, npid):
+		peer = self.peer_get(npid)
+		if not peer:
+			return False
+		peer.datalock.acquire()
+
+	def peer_unlock(self, npid):
+		peer = self.peer_get(npid)
+		if not peer:
+			return False
+		peer.datalock.release()
 
 	def peer_count(self):
 		ln = len(self.peers.keys())
@@ -478,13 +499,13 @@ class UnisocketModel:
 				peer = self.peer_get(rpid)
 				self.peerlock.release()
 				if peer and rpid != pid and peer.iqueue != None:
-					peer.datalock.acquire()
+					self.peer_lock(rpid)
 					verbinfo = peer.listen
 					addr_len = i2b(len(verbinfo[0]))
 
 					port = i2b(verbinfo[1], 2)
 					self.peer_send(pid, i2b(SHAREPEER_BYTE) + addr_len + verbinfo[0].encode("utf8") + port)
-					peer.datalock.release()
+					self.peer_unlock(rpid)
 				else:
 					self.logger.info("Refused to send {0}".format(rpid))
 					self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
