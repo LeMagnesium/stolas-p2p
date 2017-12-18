@@ -107,11 +107,12 @@ class UnisocketModel:
 	def start(self):
 		"""Start the Unisocket Networker. This is where threads are created."""
 		self.running = True
-		self.__start_listen() # There might be errors here, so we don't start anything
+		if self.listen:
+			self.__start_listen() # There might be errors here, so we don't start anything
 		self.processor.start()
 
 	def __is_already_peer(self, verbinfo):
-		return verbinfo == (self.listen_addr, self.port) or verbinfo in (self.peers[peer].listen for peer in self.peers if self.peers[peer].listen != None)
+		return (self.listen and verbinfo == (self.listen_addr, self.port)) or verbinfo in (self.peers[peer].listen for peer in self.peers if self.peers[peer].listen != None)
 
 	def __is_already_known(self, verbinfo):
 		return self.__is_already_peer(verbinfo) or verbinfo in self.possible_peers
@@ -322,7 +323,7 @@ class UnisocketModel:
 		self.peers[npid] = Peer(npid, trd, verbinfo)
 		self.peerlock.release()
 		self.peers[npid].thread.start()
-		if advertise:
+		if advertise and self.listen:
 			self.peer_send(npid, i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port, 2))
 			self.peers[npid].listen = verbinfo
 
@@ -383,7 +384,7 @@ class UnisocketModel:
 		# Waiting individually for each category of threads
 		self.logger.debug("Entered the join process")
 		# Stop the source of new connections
-		if self.listener.is_alive():
+		if self.listen and self.listener.is_alive():
 			self.listener.join()
 		# Stop the processing of all data
 		# FIXME: Maybe finish processing currently queued packets if possible?
