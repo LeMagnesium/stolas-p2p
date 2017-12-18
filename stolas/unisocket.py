@@ -410,24 +410,36 @@ class UnisocketModel:
 		peer.oqueue += data
 		return len(data)
 
-	def __processor_unit(self):
-		"""Internal. Processing unit. Must be modified for the handling of packets according to the protocol though."""
-		self.now = time.time()
-		while self.is_alive():
-			then = time.time() - self.now
-			self.now = time.time()
-			for timer in self.timers:
-				self.timers[timer] -= then
+	def integrate(self):
+		# Detect a lack of network integration and ask for peers
+		self.peerlock.acquire()
+		pln = self.peer_count()
+		if pln > 0 and self.is_alive():
+			if pln < MIN_INTEGRATION:
+				if self.integrated:
+					self.integrated = False
+					self.logger.info("I lost integration!")
+					self.timers["integration"] = random.randrange(2, 5)
 
-			# Detect a lack of network integration and ask for peers
-			self.peerlock.acquire()
-			pln = self.peer_count()
-			if pln > 0:
-				if pln < 3 and self.timers["integration"] <= 0 :
-					if self.integrated:
-						self.integrated = False
-						self.logger.info("I lost integration!")
+				if len(self.possible_peers) != 0:
+					npeer = random.choice(self.possible_peers)
+					self.peerlock.release()
+					pid = self.peer_add(npeer)
+					self.peerlock.acquire()
+					self.possible_peers.remove(npeer)
 
+				elif self.timers["integration"] <= 0:
+					rpid = random.choice(list(self.peers.keys()))
+					self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
+
+					self.timers["integration"] = random.randrange(2, 5)
+
+			elif pln >= MIN_INTEGRATION and pln < self.max_clients:
+				if not self.integrated:
+					self.logger.info("I became integrated!")
+					self.integrated = True
+
+				if self.timers["integration"] <= 0:
 					if len(self.possible_peers) == 0:
 						rpid = random.choice(list(self.peers.keys()))
 						self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
@@ -441,33 +453,22 @@ class UnisocketModel:
 						if type(pid) == type(0):
 							self.possible_peers.remove(npeer)
 
-					self.timers["integration"] = random.randrange(2, 5)
+					dd = 100 # seconds
+					mx = self.max_clients # clients
+					self.timers["integration"] = (lambda x: (dd/(mx**2)) * (x**2))(pln) # x->(dd/mx^2)*x^2
 
-				elif pln >= 3 and pln < self.max_clients:
-					if not self.integrated:
-						self.logger.info("I became integrated!")
-						self.integrated = True
+		self.peerlock.release()
 
-					if self.timers["integration"] <= 0:
-						if len(self.possible_peers) == 0:
-							rpid = random.choice(list(self.peers.keys()))
-							self.peer_get(rpid).oqueue += i2b(REQUESTPEER_BYTE)
+	def __processor_unit(self):
+		"""Internal. Processing unit. Must be modified for the handling of packets according to the protocol though."""
+		self.now = time.time()
+		while self.is_alive():
+			then = time.time() - self.now
+			self.now = time.time()
+			for timer in self.timers:
+				self.timers[timer] -= then
 
-						else:
-							npeer = random.choice(self.possible_peers)
-							self.peerlock.release()
-							pid = self.peer_add(npeer)
-							self.peerlock.acquire()
-
-							if type(pid) == type(0):
-								self.possible_peers.remove(npeer)
-
-						dd = 100 # seconds
-						mx = self.max_clients # clients
-						self.timers["integration"] = (lambda x: (dd/(mx**2)) * (x**2))(pln) # x->(dd/mx^2)*x^2
-
-			self.peerlock.release()
-
+			self.integrate()
 
 			try:
 				data, pid = self.iqueue.get(timeout=0)
