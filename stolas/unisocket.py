@@ -474,6 +474,8 @@ class UnisocketModel:
 			except queue.Empty:
 				continue
 
+			#FIXME: Reorganize and make some tasks unresponsive during shutdown
+
 			if data[0] == HELLO_BYTE: # Hello Byte
 				self.peer_get(pid).version = data[1]
 				self.logger.debug("Peer {0} is running version {1}".format(pid, data[1]))
@@ -500,7 +502,8 @@ class UnisocketModel:
 				possibles = [peer for peer in self.peers if self.peers[peer].listen != None]
 				if possibles == []:
 					self.peerlock.release()
-					self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
+					#self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
+					# For now do not respond
 					continue
 
 				rpid = random.choice(possibles)
@@ -516,11 +519,11 @@ class UnisocketModel:
 					self.peer_unlock(rpid)
 				else:
 					self.logger.info("Refused to send {0}".format(rpid))
-					self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
+					#self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3) See 517
 
 			elif data[0] == MESSAGE_BYTE: # Message Arrival Byte
 				payload_len = b2i(data[1:3])
-				msg = data[3:3+payload_len].decode("utf8")
+				msg = data[3:3+payload_len]
 				self.logger.info("Received '{0}' from {1}".format(msg, pid))
 				self.imessages.put(("message", msg))
 				self.peer_send(pid, i2b(MESSAGEACK_BYTE) + i2b(payload_len, 2))
