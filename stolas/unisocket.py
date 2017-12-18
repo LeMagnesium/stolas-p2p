@@ -179,9 +179,11 @@ class UnisocketModel:
 		# Only the UniSocket Peer Thread of a specific Peer can eventually erase itself
 		# That ensures we never run into a situation where a semi-ghost peer thread runs
 		self.peerlock.acquire()
+		self.peer_lock(pid)
 		del self.peers[pid]
+		peer.datalock.release() # The peer isn't registered any more
 		self.peerlock.release()
-		self.logger.debug("Stopped")
+		self.logger.debug("Stopped peer {0}".format(pid))
 
 	def parse_packets(self, peerid):
 		"""Parse the peer's input buffer and slice the packets when complete so
@@ -271,6 +273,9 @@ class UnisocketModel:
 				psock, pinfo = self.listen_socket.accept()
 			except BlockingIOError:
 				continue
+			except OSError:
+				continue # Happens with ERRno24 : too many files open
+
 
 			npid = self.peer_add(pinfo, psock)
 		try:
@@ -377,7 +382,7 @@ class UnisocketModel:
 
 	def stop(self):
 		self.running = False
-		self.logger.debug("Initiated Killing Process : ")
+		self.logger.debug("Initiated Killing Process")
 
 	def is_alive(self):
 		return self.running
@@ -531,13 +536,24 @@ class UnisocketModel:
 				port = b2i(data[-2:])
 
 				ip = data[2:2+addr_len].decode("utf8")
+				self.peer_lock(pid)
 				peer = self.peer_get(pid)
+				if peer == None:
+					# There was never any peer locking anyways,
+					# If it returns None now, the peer was deleted before our locking
+					continue
 
 				listen = (ip if ip != "" else peer.verbinfo[0], port)
 
-				self.peer_get(pid).listen = listen
-				#FIXME: Drop peer if we realize we already had them
+				if self.__is_already_peer(listen):
+					self.logger.info("Dropping peer {0}, they were already connected to us".format(pid, listen))
+					self.peer_unlock(pid)
+					self.peer_del(pid)
+					continue
+				peer.listen = listen
+
 				self.logger.info("Peer {0}'s listen is revealed to be {1}".format(pid, listen))
+				self.peer_unlock(pid)
 
 			elif data[0:56] == self.death_sequence: # Death Sequence
 				self.stop()
