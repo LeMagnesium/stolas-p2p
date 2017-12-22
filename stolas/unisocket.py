@@ -44,7 +44,7 @@ class UnisocketModel:
 		if self.listen:
 			self.listen_addr = "127.0.0.1" # Will change later
 		self.name = kwargs.get("name", None)
-		self.max_clients = 30
+		self.max_clients = 50
 		self.death_sequence = DEATH_SEQUENCE
 
 		# Dynamic status fields
@@ -328,11 +328,11 @@ class UnisocketModel:
 		)
 
 		self.peers[npid] = Peer(npid, trd, verbinfo)
-		self.peerlock.release()
 		self.peers[npid].thread.start()
 		if advertise and self.listen:
-			self.peer_send(npid, i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port, 2))
 			self.peers[npid].listen = verbinfo
+			self.peer_send(npid, i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port, 2))
+		self.peerlock.release()
 
 		return npid
 
@@ -455,7 +455,9 @@ class UnisocketModel:
 
 					dd = 100 # seconds
 					mx = self.max_clients # clients
+					# Parabolic integration timer
 					self.timers["integration"] = (lambda x: (dd/(mx**2)) * (x**2))(pln) # x->(dd/mx^2)*x^2
+					#self.timers["integration"] = (lambda x: -(dd/ ((MIN_INTEGRATION - self.max_clients) ** 2)) * (x - self.max_clients) ** 2 + dd)(pln)
 
 		self.peerlock.release()
 
