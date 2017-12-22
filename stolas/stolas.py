@@ -41,11 +41,10 @@ class Stolas:
 		self.processor.start()
 
 	def message_vacuum(self):
-		return
-		"""for ts in list(self.message_stack.keys()):
+		for ts in list(self.message_stack.keys()):
 			msg = self.message_stack[ts]
 			if msg.ttl > time.time() - msg.timestamp:
-				del self.message_stack[ts]"""
+				del self.message_stack[ts]
 
 	def is_alive(self):
 		return self.running
@@ -71,7 +70,7 @@ class Stolas:
 				# Create the message by exploding the binary blob
 				msg = protocol.Message.explode(message)
 				self.message_stack[msg.get_timestamp()] = msg
-				print("\r{0}[-]>".format(msg.payload)) #FIXME: Temporary
+				print("\r{0}\n[-]> ".format(msg.payload), end = " ") #FIXME: Temporary
 			self.networker.imessages.task_done()
 
 		#print("Shutting down")
