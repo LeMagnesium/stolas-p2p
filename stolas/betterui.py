@@ -51,16 +51,20 @@ else:
 		}
 	}
 
-olprint = print
+from os import name as osname
 
 def pprint(st = "", **kwargs):
-	#FIXME: I'm sure there is a cleaner way to do this
 	st = str(st)
+
+	# Filter out all that is not ASCII if we're on Windows
+	# Chances are that code is run from CMD on a school computer and those
+	# don't handle unicode at all.
+	if osname == "nt":
+		st = bytearray([x for x in st.encode("utf8") if x in range(128)]).decode("utf8")
+
 	if st.find("~<") != -1:
 		for code in pretty_printing:
 			for variant in pretty_printing[code]:
 				st = st.replace("~<{0}:{1}]".format(code, variant), pretty_printing[code][variant])
 
-	olprint(st, **kwargs)
-
-#print = pprint
+	print(st, **kwargs)
