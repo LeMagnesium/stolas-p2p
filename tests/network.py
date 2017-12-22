@@ -1,7 +1,8 @@
 #!/usr/bin/python3
+# -*- encoding: utf8 -*-
 
 import time
-import os
+import os, os.path
 import threading
 import random
 import socket
@@ -12,7 +13,12 @@ from stolas.stolas import Stolas
 from stolas.unisocket import UnisocketModel
 
 def run_stolas():
-	eh = Stolas()
+	port = None
+	if len(sys.argv) >= 3:
+		port = int(sys.argv[2])
+		eh = Stolas(port = port)
+	else:
+		eh = Stolas()
 	eh.start()
 	print(eh.port)
 	manual_stolas_prompt(eh)
@@ -27,13 +33,22 @@ def __send_shutdown(obj):
 	s.close()
 	print("Network is about to collapse...")
 
-def build_network(stolobj, total = None):
+def __trigger_connection(n, host):
+	import time
+	time.sleep(1)
+	try:
+		n.peer_add(host)
+	except:
+		pass
+
+def build_network(start_port, total = None):
 	models = []
-	port = stolobj.port
-	total = total or random.randrange(5, 20)
+	ports = [start_port]
+	port = start_port
+	total = total or random.randrange(5, 10)
 	for progress in range(total):
 		while True:
-			n = UnisocketModel(port, str(port)) # Should fail the first time
+			n = UnisocketModel(port, name = str(port-start_port)) # Should fail the first time
 			try:
 				n.start()
 			except OSError:
@@ -41,10 +56,12 @@ def build_network(stolobj, total = None):
 				port += 1
 				continue
 			else:
-				#n.peer_add(("127.0.0.1", stolobj.port))
-				n.peer_add(("127.0.0.1", port-1))
+				if port > start_port:
+					tr = threading.Thread(target = __trigger_connection, args = (n, ("127.0.0.1", random.choice(ports))))
+					tr.start()
+				ports.append(port)
 				break
-		print("Connected peer {0}/{1}".format(progress+1, total), end = "\r")
+		print("Connected peer {0}/{1}  ".format(progress+1, total), end = "\r")
 		port += 1
 
 		models.append(n)
@@ -67,39 +84,41 @@ def prepare_logging_locations():
 def collapse_network(models):
 	i = 1
 	for obj in models:
+		print("Sending termination to model {0}".format(i), end = "\r")
 		obj.stop()
+		print("Joining model {0} ({1})...".format(i, type(obj)), end = "\r")
 		obj.join()
 		print("Model {0} terminated".format(i), end = "\r")
 		i += 1
 	print()
 
 def test_network_integration_and_collapsing():
+	import time
 	portfile, logfile = prepare_logging_locations()
 
 	threading.current_thread().setName("Main__")
-	eh = Stolas()
-	eh.start()
-	open(portfile, "w").write(str(eh.port))
+	port = random.randrange(1024, 65500)
+	open(portfile, "w").write(str(port))
 	open(logfile, "w")
 
-	print("Started on port {0}".format(eh.port))
+	print("Started on port {0}".format(port))
 
-	models = build_network(eh, random.randrange(10, 20))
+	models = build_network(port, random.randrange(10, 20))
 
 	print("Readying...")
-	#tr = threading.Timer(random.randrange(1, 10), lambda: __send_shutdown(eh))
-	#tr.start()
-	print("Ready!")
+	print("Ready! ~<f:green]~<s:bright]\u2713~<s:reset_all]")
+	print("Now is : {0}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(time.time()))))
+	now = time.time()
 	# We shall wait for all peers to be integrated
 	i = 0
-	while eh.running and False in [m.integrated for m in models + [eh.networker]]:
+	while False in [m.integrated for m in models]:
 		print("Awaiting integration" + (i * ".") + (5-i) * " ", end = "\r")
 		time.sleep(1)
 		i = (i+1)%6
 
+	total_time = time.time() - now
 	print("Network has fully integrated ~<s:bright]~<f:green]\u2713~<s:reset_all]")
-	eh.stop()
-	eh.join()
+	print("It took : {0:.2f}s ({1}s per peer)".format(total_time, total_time/len(models)))
 	print("Now killing all models")
 	collapse_network(models)
 	print("Stopped")
@@ -121,9 +140,11 @@ def manual_stolas_prompt(eh):
 			eh.running = False
 
 		csplit = command.split(" ")
-		if csplit[0] == "connect":
+		if csplit[0] == "connect" and len(csplit) == 3 and csplit[2].isdecimal():
+			csplit[1] = socket.gethostbyname(csplit[1])
 			pid = eh.networker.peer_add((csplit[1], int(csplit[2])))
 			if type(pid) != type(0) and pid == False:
+				print("En error occured...")
 				continue
 			else:
 				print("Added peer {0} => PID {1}".format(csplit[1:3], pid))
@@ -140,12 +161,15 @@ def manual_stolas_prompt(eh):
 
 		elif csplit[0] == "peers":
 			eh.networker.peerlock.acquire()
-			for peer in eh.networker.peers:
+			colors = ["red", "yellow", "green", "cyan", "blue", "magenta"]
+			col = random.randrange(0,len(colors))
+			for peer in sorted(list(eh.networker.peers.keys())):
 				print("~<s:bright]{0}~<s:reset_all] => ~<f:{1}]{2}~<s:reset_all]".format(
 					peer,
-					random.choice(["red", "green", "cyan", "yellow", "magenta", "blue"]),
+					colors[col],
 					eh.networker.peers[peer].listen or eh.networker.peers[peer].verbinfo
 				))
+				col = (col+1)%len(colors)
 			eh.networker.peerlock.release()
 
 		elif csplit[0] == "fpeers":
@@ -153,6 +177,14 @@ def manual_stolas_prompt(eh):
 			for peer in [eh.networker.peers[peer] for peer in eh.networker.peers if eh.networker.peers[peer].listen != None]:
 				print("~<s:bright]{0}~<s:reset_all] => ~<s:bright]{1}~<s:reset_all]".format(peer.pid, peer.listen))
 			eh.networker.peerlock.release()
+
+		elif csplit[0] == "port":
+			print("Port is : {0}".format(eh.port))
+
+		elif csplit[0] == "messages":
+			print("Inbox:")
+			for ts in sorted(eh.message_stack.keys()):
+				print("[{0}] {1}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(ts)), eh.message_stack[ts].get_payload()))
 
 
 	print("Prompt terminated")
@@ -170,7 +202,7 @@ def test_manual_network_manipulation():
 	print("Started on port {0}".format(eh.port))
 	print("Building network...")
 
-	models = build_network(eh, random.randrange(15, 30))
+	models = build_network(eh.port, random.randrange(15, 20))
 
 	print("Ready ~<f:green]~<s:bright]\u2713~<f:reset]~<s:reset_all]")
 	eh.start()
@@ -182,9 +214,10 @@ def test_manual_network_manipulation():
 
 	print("Collapsing Network...")
 	collapse_network(models)
-	print("Network collapsed \u2713")
+	print("Network collapsed ~<s:bright]~<f:green]\u2713~<s:reset_all]")
 	assert(threading.active_count() == 1)
-	os.remove(portfile)
+	if os.path.isfile(portfile):
+		os.remove(portfile)
 
 def create_ponderation(ran):
 	d = []
@@ -192,6 +225,57 @@ def create_ponderation(ran):
 		d += [e+1] * (ran-e)
 	return d
 
+import hashlib
+def run_cluster():
+	threading.current_thread().setName("Main__")
+	port = random.randrange(1024, 65400)
+
+	print("Main Stolas object started")
+
+	controlfile = "{0}_cluster.ctrl".format(hashlib.sha1(str(time.time()+random.randrange(-10000, 10000)).encode("utf8")).hexdigest()[:8])
+
+	print("Creating control file : {0}".format(controlfile))
+	open(controlfile, "w")
+	print("~<s:bright]Remove the control file at any time to collapse the cluster.~<s:reset_all]")
+	print("Creating network cluster from port {0}...".format(port))
+	models = build_network(port, random.randrange(5, 20))
+	print("Running ~<f:green]~<s:bright]\u2713~<s:reset_all]")
+
+	mm = [m for m in models if m.is_alive()]
+	while len(mm) > 0 and os.path.isfile(controlfile):
+		print("Current count: {0} (0port: {1})".format(len(mm), min([m.port for m in mm])), end = "  \r")
+		mm = [m for m in mm if m.is_alive()]
+
+	if os.path.isfile(controlfile):
+		os.remove(controlfile)
+
+	print("\n~<f:blue]~<s:bright]Cluster Collapsing~<s:reset_all]")
+	collapse_network(models)
+	assert(threading.active_count() == 1)
+
+def average_cluster_integration():
+	threading.current_thread().setName("Main__")
+	port = random.randrange(1024, 65400)
+
+	controlfile = "{0}_cluster.ctrl".format(hashlib.sha1(str(time.time()+random.randrange(-10000, 10000)).encode("utf8")).hexdigest()[:8])
+
+	print("Creating control file : {0}".format(controlfile))
+	open(controlfile, "w")
+
+	print("Creating network cluster from port {0}...".format(port))
+	models = build_network(port, random.randrange(10, 20))
+	print("Running ~<f:green]~<s:bright]\u2713~<s:reset_all]")
+
+	mm = [m for m in models if m.is_alive()]
+	while len(mm) > 0 and os.path.isfile(controlfile):
+		print("Avg. integration is : {0:.2f} (0port: {1}) ".format(sum([len(m.peers) for m in mm]) / len(mm), min([m.port for m in mm])), end = " \r")
+		mm = [m for m in mm if m.is_alive()]
+		time.sleep(1)
+
+	print()
+	print("~<f:blue]~<s:bright]Cluster Collapsing~<s:reset_all]")
+	collapse_network(models)
+	assert(threading.active_count() == 1)
 
 if __name__ == "__main__":
 	import sys
@@ -205,6 +289,14 @@ if __name__ == "__main__":
 
 		elif sys.argv[1] == "simple":
 			run_stolas()
+
+		elif sys.argv[1] == "cluster":
+			print("~<s:bright][ Lauching Cluster of Unisocket Models")
+			print("[" + "-" * 50 + "]~<s:reset_all]")
+			run_cluster()
+
+		elif sys.argv[1] == "average":
+			average_cluster_integration()
 
 	else:
 		print("~<s:bright]Launching Manual Control System~<s:reset_all]")
