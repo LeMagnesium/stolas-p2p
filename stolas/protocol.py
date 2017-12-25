@@ -11,11 +11,18 @@ ADVERTISE_BYTE = 8
 DEATH_SEQUENCE = b"\x57\x68\x61\x74\x20\x69\x73\x20\x6c\x6f\x76\x65\x3f\x20\x42\x61\x62\x79\x20\x64\x6f\x6e\x27\x74\x20\x68\x75\x72\x74\x20\x6d\x65\x2c\x20\x64\x6f\x6e\x27\x74\x20\x68\x75\x72\x74\x20\x6d\x65\x2c\x20\x6e\x6f\x20\x6d\x6f\x72\x65"
 
 MIN_INTEGRATION = 5
+MAX_INTEGRATION = 50 # This one can be overwritten later
 
+from hashlib import sha512
+import time
+import os
+import random
 from .utils import b2i, i2b
 
 class Message:
 	def __init__(self, **kwargs):
+		self.__usig = sha512("{0}{1}{2}{3}".format(time.time(), MIN_INTEGRATION, kwargs, os.urandom(random.randrange(1, 256))).encode("utf8")).digest()
+
 		timestamp = kwargs.get("timestamp", None)
 		if timestamp != None:
 			self.set_timestamp(timestamp)
@@ -35,10 +42,22 @@ class Message:
 		if kwargs.get("defaults", False):
 			self.__set_defaults()
 
+	def __eq__(self, value):
+		if not isinstance(value, Message):
+			return False
+
+		return self.usig() == value.usig() and self.timestamp == value.timestamp and self.ttl == value.ttl and self.channel == value.channel and self.payload == value.payload
+
+	def __neq__(self, value):
+		return not self.__eq__(value)
+
 	def __set_defaults(self):
 		self.set_timestamp(0)
 		self.set_ttl(60)
 		self.set_channel("")
+
+	def usig(self):
+		return hex(b2i(self.__usig))[2:]
 
 	def implode(self):
 		"""Implode the python object into a binary payload"""
@@ -52,6 +71,7 @@ class Message:
 			raise TypeError("Payload is None")
 
 		data = b""
+		data += self.__usig
 		data += i2b(self.timestamp, minimal = 8)
 		data += i2b(self.ttl, minimal = 4)
 		data += i2b(len(self.channel))
@@ -59,6 +79,12 @@ class Message:
 		data += self.payload
 
 		return data
+
+	def is_complete(self):
+		return not None in [self.timestamp, self.ttl, self.channel, self.payload]
+
+	def is_alive(self):
+		return time.time() < self.timestamp + self.ttl
 
 	@staticmethod
 	def explode(data):
@@ -68,6 +94,8 @@ class Message:
 			raise ValueError("Malformed message data")
 
 		self = Message()
+		self.__usig = data[:64]
+		data = data[64:]
 		self.set_timestamp(b2i(data[:8]))
 		self.set_ttl(b2i(data[8:12]))
 		chanlen = data[12]
