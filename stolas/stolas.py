@@ -10,6 +10,72 @@ from stolas.unisocket import UnisocketModel, i2b, b2i
 
 randport = lambda: random.randrange(1024, 65536)
 
+class MessagePile:
+	def __init__(self):
+		"""Initialize the Message Stack object. Needs no parameters."""
+		self.data = {}
+		self.__lock = threading.Lock()
+
+	def __new_msgid(self):
+		"""Internal. Get a new message ID."""
+		# This, here, is a trick. If our list has no index holes, then the only
+		# number returned by the generator will be the next index (hence '+1'),
+		# but if holes remain then this generator will return the first one of
+		# them instead.
+		return [x for x in range(len(self.data)+1) if not self.data.get(x, False)][0]
+
+	def __contains__(self, key):
+		return True in [self.data[mid] == key for mid in self.data]
+
+	def add(self, message):
+		"""Add a message onto the pile. Expects a stolas.protocol.Message object."""
+		if message == None or not isinstance(message, protocol.Message):
+			raise TypeError("Invalid data type {0}: expected stolas.protocol.Message")
+
+		elif not message.is_complete():
+			raise ValueError("Incomplete Message object provided. One field is 'None'")
+
+		# Otherwise, we're okay to go
+		elif message.is_alive():
+			self.__lock.acquire()
+			nmid = self.__new_msgid()
+			self.data[nmid] = message
+			self.__lock.release()
+			return nmid
+
+	def get(self, message_id, alternative = None):
+		return self.data.get(message_id, alternative)
+
+	def get_random(self):
+		self.__lock.acquire()
+		acceptable = [mid for mid in self.data if self.data[mid].is_alive()]
+		if len(acceptable) == 0:
+			self.__lock.release()
+			return None
+
+		msg = self.get(random.choice(acceptable))
+		self.__lock.release()
+		return msg
+
+	def list(self):
+		return self.data.copy()
+
+	def delete(self, message_id):
+		if not self.get(message_id, False):
+			return False
+
+		self.__lock.acquire()
+		del self.data[message_id]
+		self.__lock.release()
+		return True
+
+	def vacuum(self):
+		for mid in list(self.data.keys()):
+			# We use the key list so that it is a separate entity from the pile
+			# which size we cannot guarantee won't change during vacuuming
+			msg = self.get(mid)
+			if msg and not msg.is_alive():
+				self.delete(mid)
 
 class Stolas:
 	def __init__(self, **kwargs):
@@ -25,8 +91,9 @@ class Stolas:
 		)
 
 		self.now = None
-		self.vacuum_timer = 60
-		self.message_stack = {}
+		self.vacuum_timer = 5
+		self.mpile = MessagePile()
+		self.distribution_timer = 10
 
 	def stop(self):
 		self.running = False
@@ -40,14 +107,15 @@ class Stolas:
 		self.running = True
 		self.processor.start()
 
-	def message_vacuum(self):
-		for ts in list(self.message_stack.keys()):
-			msg = self.message_stack[ts]
-			if msg.ttl > time.time() - msg.timestamp:
-				del self.message_stack[ts]
-
 	def is_alive(self):
 		return self.running
+
+	def message_distribution(self):
+		self.distribution_timer = random.randrange(9,12)
+		randomly_selected_message = self.mpile.get_random()
+		if not randomly_selected_message:
+			return
+		self.message_broadcast(randomly_selected_message)
 
 	def __processor_unit(self):
 		self.now = time.time()
@@ -57,9 +125,14 @@ class Stolas:
 
 			dt = time.time() - self.now
 			self.vacuum_timer -= dt
+			self.distribution_timer -= dt
 			self.now += dt
 			if self.vacuum_timer <= 0:
-				self.message_vacuum()
+				self.mpile.vacuum()
+				self.vacuum_timer = 5
+
+			if self.distribution_timer <= 0:
+				self.message_distribution()
 
 			try:
 				mtype, message = self.networker.imessages.get(timeout=0)
@@ -69,19 +142,15 @@ class Stolas:
 			if mtype == "message":
 				# Create the message by exploding the binary blob
 				msg = protocol.Message.explode(message)
-				self.message_stack[msg.get_timestamp()] = msg
-				print("\r{0}\n[-]> ".format(msg.payload), end = " ") #FIXME: Temporary
+				if not msg in self.mpile and msg.is_alive():
+					nmid = self.mpile.add(msg)
+					#print("Logged in message {0}".format(nmid))
+					#print("\r{0}\n[-]> ".format(msg.payload), end = " ") #FIXME: Temporary
 			self.networker.imessages.task_done()
 
 		#print("Shutting down")
 
-	def message_broadcast(self, message):
-		msgobj = protocol.Message()
-		msgobj.set_payload(message)
-		msgobj.set_timestamp(time.time())
-		msgobj.set_ttl(70)
-		msgobj.set_channel("")
-
+	def message_broadcast(self, msgobj):
 		data = msgobj.implode()
 
 		payload_len = i2b(len(data), 2)
@@ -92,4 +161,6 @@ class Stolas:
 		for peerid in self.networker.peers:
 			self.networker.peer_send(peerid, i2b(protocol.MESSAGE_BYTE) + payload_len + data)
 		self.networker.peerlock.release()
-		self.message_stack[msgobj.get_timestamp()] = msgobj
+		if not msgobj in self.mpile and msgobj.is_alive():
+			mid = self.mpile.add(msgobj)
+			# print("Logged in message {0}".format(mid))
