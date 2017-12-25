@@ -8,8 +8,6 @@
 import threading	# `threading.Thread`
 import socket		# `socket.socket`
 import queue		# `queue.Queue`, `queue.Empty`
-import logging		# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler`
-import logging.handlers	# `logging.handlers.RotatingFileHandler`
 import os			# `os.name`
 import random		# `random.randrange`, `random.choice`
 import time
@@ -32,8 +30,21 @@ class Peer:
 		self.listen = None
 		self.datalock = threading.Lock()
 
-# Model of UniSocket P2P client
-# Should be tweaked/inherited to be modified
+	def __repr__(self):
+		return "Peer(pid={0}, verbinfo={1}, version={2})".format(self.pid, self.verbinfo, self.version)
+
+class PhantomLogger:
+	def debug(msg, *args, **kwargs):
+		pass
+
+	def warning(msg, *args, **kwargs):
+		pass
+
+	def info(msg, *args, **kwargs):
+		pass
+
+
+# Model of UniSocket P2P manager
 class UnisocketModel:
 	"""Unisocket Model for the P2P instance of our project."""
 	def __init__(self, port, **kwargs):
@@ -44,6 +55,8 @@ class UnisocketModel:
 		if self.listen:
 			self.listen_addr = "127.0.0.1" # Will change later
 		self.name = kwargs.get("name", None)
+		if self.name == None:
+			self.name = hex(random.randrange(7800000,78000000))[2:10]
 		self.max_clients = 50
 		self.death_sequence = DEATH_SEQUENCE
 
@@ -71,38 +84,26 @@ class UnisocketModel:
 		# Control Structures
 		self.peerlock = threading.Lock()
 
-		self.__logging_setup()
+		# The logger
+		self.logger = kwargs.get("logger", PhantomLogger())
+		# Since logging has been moved upwards to the Stolas object, we can
+		# only log stuff if we're passed the logging object it has created.
+		# Thus, and as to not break the possibility of seeing the emitting
+		# line and file from the verbose logs, we created a PhantomLogger
+		# class meant to implement hollow versions of the logging methods we
+		# used so far.
 
 		self.processor = threading.Thread(
 			target = self.__processor_unit,
 			name = "Processor" + self.__nametag()
 		)
 
+	def __del__(self):
+		self.logger.debug("UniSocket model deleted")
+
 	def __nametag(self):
 		"""Return the nametag for our object, appended to the Thread Name Roots"""
 		return "::{0}".format(self.name) if self.name != None else ""
-
-	def __logging_setup(self):
-		"""Internal. Setup logging and logging handlers."""
-		# Create a console handler
-		self.logger = logging.Logger("UniSocket" + self.__nametag())
-		console = logging.StreamHandler()
-		console.setLevel(logging.CRITICAL)
-		c_formatter = logging.Formatter('%(message)s') # Keep it simple
-		console.setFormatter(c_formatter)
-		self.logger.addHandler(console)
-
-		# Create the file handler.
-		logfile = "unisocket_logs"
-		if os.name == "posix":
-			logfile = "/tmp/unisocket_logs"
-		file_lo = logging.handlers.RotatingFileHandler(filename = logfile)
-		file_lo.setLevel(logging.DEBUG)
-		f_formatter = logging.Formatter('[%(asctime)s][%(levelname)7s][%(name)20s:%(funcName)25s:%(lineno)3s][%(threadName)20s] %(message)s')
-		file_lo.setFormatter(f_formatter)
-		self.logger.addHandler(file_lo)
-
-		self.logger.debug("Logger Ready")
 
 	def start(self):
 		"""Start the Unisocket Networker. This is where threads are created."""

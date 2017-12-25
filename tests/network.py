@@ -11,6 +11,7 @@ from stolas.betterui import pprint as print
 
 from stolas.stolas import Stolas
 from stolas.unisocket import UnisocketModel
+from stolas.protocol import Message
 
 def run_stolas():
 	port = None
@@ -149,8 +150,17 @@ def manual_stolas_prompt(eh):
 			else:
 				print("Added peer {0} => PID {1}".format(csplit[1:3], pid))
 
+		elif csplit[0] == 'ppeers':
+			print(eh.networker.possible_peers)
+
 		elif csplit[0] == "broadcast" and len(csplit) > 1:
-			eh.message_broadcast(" ".join(csplit[1:]).encode("utf8"))
+			msgobj = Message()
+			msgobj.set_payload(" ".join(csplit[1:]).encode("utf8"))
+			msgobj.set_timestamp(time.time())
+			msgobj.set_ttl(70)
+			msgobj.set_channel("")
+
+			eh.message_broadcast(msgobj)
 
 		elif csplit[0] == "haddaway":
 			eh.networker.peerlock.acquire()
@@ -183,8 +193,10 @@ def manual_stolas_prompt(eh):
 
 		elif csplit[0] == "messages":
 			print("Inbox:")
-			for ts in sorted(eh.message_stack.keys()):
-				print("[{0}] {1}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(ts)), eh.message_stack[ts].get_payload()))
+			msgs = eh.mpile.list()
+			for mid in sorted(msgs):
+				msg = msgs[mid]
+				print("[{0}] {1}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(msg.timestamp)), msg.get_payload()))
 
 
 	print("Prompt terminated")

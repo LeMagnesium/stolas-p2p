@@ -4,6 +4,9 @@ import threading
 import queue
 import random
 import time
+import os, os.path
+import logging			# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler`
+import logging.handlers	# `logging.handlers.RotatingFileHandler`
 
 import stolas.protocol as protocol
 from stolas.unisocket import UnisocketModel, i2b, b2i
@@ -81,12 +84,20 @@ class Stolas:
 	def __init__(self, **kwargs):
 		self.port = kwargs.get("port", randport())
 		self.running = False
+		self.name = kwargs.get("name", None)
+		if self.name == None:
+			self.name = hex(random.randrange(pow(16,8),pow(16,16)))[2:10]
 
-		self.networker = UnisocketModel(self.port, name = "STOLAS")
+		self.__logging_setup()
+
+		if kwargs.get("logdown", False):
+			self.networker = UnisocketModel(self.port, name = "US," + self.name, logger = self.logger)
+		else:
+			self.networker = UnisocketModel(self.port, name = "US," + self.name)
 		self.networker.start()
 
 		self.processor = threading.Thread(
-			name = "Cpu",
+			name = "CPU," + self.name,
 			target = self.__processor_unit
 		)
 
@@ -94,6 +105,45 @@ class Stolas:
 		self.vacuum_timer = 5
 		self.mpile = MessagePile()
 		self.distribution_timer = 10
+
+	def __logging_setup(self):
+		logfile = "stolas_logs"
+
+		if os.name == "posix":
+			logfile = "/tmp/stolas_logs"
+		elif os.name == "nt":
+			filepath = os.getenv('APPDATA') + os.path.sep + "Stolas"
+			try:
+				os.mkdir(filepath)
+			except FileExistsError:
+				pass
+			except PermissionError:
+				logfile = "stolas_logs"
+			else:
+				logfile = filepath + os.path.sep + logfile
+
+		"""Internal. Setup logging and logging handlers."""
+		# Create a console handler
+		self.logger = logging.Logger("Stolas(" + self.name + ")")
+		console = logging.StreamHandler()
+		console.setLevel(logging.CRITICAL)
+		c_formatter = logging.Formatter('%(message)s') # Keep it simple
+		console.setFormatter(c_formatter)
+		self.logger.addHandler(console)
+
+		# Create the file handler.
+		file_lo = logging.handlers.RotatingFileHandler(filename = logfile)
+		file_lo.setLevel(logging.DEBUG)
+		f_formatter = logging.Formatter('[%(asctime)s][%(levelname)7s][%(name)20s:%(funcName)25s:%(lineno)3s][%(threadName)20s] %(message)s')
+		file_lo.setFormatter(f_formatter)
+		self.logger.addHandler(file_lo)
+
+		self.logger.debug("Logger Ready")
+
+	def __del__(self):
+		del self.networker
+		del self.mpile
+		self.logger.debug("Stolas object deleted")
 
 	def stop(self):
 		self.running = False
@@ -128,11 +178,16 @@ class Stolas:
 			self.distribution_timer -= dt
 			self.now += dt
 			if self.vacuum_timer <= 0:
+				self.logger.debug("Vacuuming the MPile")
 				self.mpile.vacuum()
 				self.vacuum_timer = 5
 
 			if self.distribution_timer <= 0:
 				self.message_distribution()
+				# Parabolic timer
+				#self.distribution_timer = (lambda x: -(10/65025) * (x**2 - 1)**2 + 10)(len(self.mpile.list()))
+				# Hyperbolic timer
+				self.distribution_timer = (lambda x: 1/(x-(9/10)))(len(self.mpile.list()))
 
 			try:
 				mtype, message = self.networker.imessages.get(timeout=0)
@@ -144,11 +199,10 @@ class Stolas:
 				msg = protocol.Message.explode(message)
 				if not msg in self.mpile and msg.is_alive():
 					nmid = self.mpile.add(msg)
-					#print("Logged in message {0}".format(nmid))
-					#print("\r{0}\n[-]> ".format(msg.payload), end = " ") #FIXME: Temporary
+					self.logger.info("Logged in message {0}".format(nmid))
 			self.networker.imessages.task_done()
 
-		#print("Shutting down")
+		self.logger.info("Shutting down CPU")
 
 	def message_broadcast(self, msgobj):
 		data = msgobj.implode()
@@ -163,4 +217,4 @@ class Stolas:
 		self.networker.peerlock.release()
 		if not msgobj in self.mpile and msgobj.is_alive():
 			mid = self.mpile.add(msgobj)
-			# print("Logged in message {0}".format(mid))
+			self.logger.info("Logged in message {0}".format(mid))
