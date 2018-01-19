@@ -30,6 +30,9 @@ class MessagePile:
 	def __contains__(self, key):
 		return True in [self.data[mid] == key for mid in self.data]
 
+	def __len__(self):
+		return len(self.data)
+
 	def add(self, message):
 		"""Add a message onto the pile. Expects a stolas.protocol.Message object."""
 		if message == None or not isinstance(message, protocol.Message):
@@ -142,7 +145,8 @@ class Stolas:
 
 	def __del__(self):
 		del self.networker
-		del self.mpile
+		if getattr(self, "mpile", None) != None:
+			del self.mpile
 		self.logger.debug("Stolas object deleted")
 
 	def stop(self):

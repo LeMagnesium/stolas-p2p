@@ -23,24 +23,26 @@ class Message:
 	def __init__(self, **kwargs):
 		self.__usig = sha512("{0}{1}{2}{3}".format(time.time(), MIN_INTEGRATION, kwargs, os.urandom(random.randrange(1, 256))).encode("utf8")).digest()
 
-		timestamp = kwargs.get("timestamp", None)
-		if timestamp != None:
-			self.set_timestamp(timestamp)
-
-		ttl = kwargs.get("ttl", None)
-		if ttl: # TTL cannot be 0
-			self.set_ttl(ttl)
-
-		channel = kwargs.get("ttl", None)
-		if channel:
-			self.set_channel(channel)
-
-		payload = kwargs.get("payload", None)
-		if payload:
-			self.set_payload(payload)
-
 		if kwargs.get("defaults", False):
 			self.__set_defaults()
+
+		self.timestamp = kwargs.get("timestamp", None)
+		if self.timestamp != None:
+			self.set_timestamp(self.timestamp)
+		else:
+			self.set_timestamp(time.time())
+
+		self.ttl = kwargs.get("ttl", None)
+		if self.ttl: # TTL cannot be 0
+			self.set_ttl(self.ttl)
+
+		self.channel = kwargs.get("channel", None)
+		if self.channel:
+			self.set_channel(self.channel)
+
+		self.payload = kwargs.get("payload", None)
+		if self.payload:
+			self.set_payload(self.payload)
 
 	def __eq__(self, value):
 		if not isinstance(value, Message):
@@ -50,6 +52,14 @@ class Message:
 
 	def __neq__(self, value):
 		return not self.__eq__(value)
+
+	def __repr__(self):
+		return "protocol.Message(chan=\"{0}\", payload={1}, ttl={2}, timestamp={3})".format(
+			self.channel,
+			self.payload[:10] + b'...',
+			self.ttl,
+			self.timestamp
+	)
 
 	def __set_defaults(self):
 		self.set_timestamp(0)

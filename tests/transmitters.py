@@ -9,6 +9,7 @@ import hashlib
 import time
 
 import stolas.stolas
+import stolas.protocol
 from stolas.betterui import pprint as print
 
 from network import manual_stolas_prompt
@@ -33,11 +34,10 @@ def network_random(port, quantity = None):
 					rport = random.choice(ports)
 					pid = stols.networker.peer_add(("127.0.0.1", rport))
 
-				print("Created model {0}...".format(n), end = "\r")
-				ports.append(cport)
-				cport += 1
+				print("Created model {0}...".format(n+1), end = "\r")
 				break
 
+		cport += 1
 		ports.append(cport)
 		objects.append(stols)
 
@@ -73,6 +73,8 @@ def stolas_cluster():
 		mm = [x.port for x in cluster if x.is_alive()]
 		#print([m for m in cluster if m.is_alive()][0].networker.peers)
 
+	if os.path.isfile(controlfile):
+		os.remove(controlfile)
 	print("\n~<s:bright]~<f:blue]Cluster collapsing~<s:reset_all]")
 	network_collapse(cluster)
 	print("Done")
@@ -91,6 +93,8 @@ def stolas_gigacluster():
 		mm = [x.port for x in cluster if x.is_alive()]
 		#print([m for m in cluster if m.is_alive()][0].networker.peers)
 
+	if os.path.isfile(controlfile):
+		os.remove(controlfile)
 	print("\n~<s:bright]~<f:blue]Cluster collapsing~<s:reset_all]")
 	network_collapse(cluster)
 	print("Done")
@@ -104,8 +108,76 @@ def stolas_simple():
 	slobj.join()
 	print("Done")
 
+def average(lst):
+	return sum(lst)/len(lst)
+
+def transmission_test():
+	print("~<s:bright]Starting Message Transmission Test~<s:reset_all]")
+	controlfile = create_ctrlfile()
+
+	sender = stolas.stolas.Stolas()
+	receiver = stolas.stolas.Stolas()
+	print("\t=> Ends created ~<s:bright]~<f:green]\u2713~<s:reset_all]")
+
+	sender.start()
+	receiver.start()
+	print("\t=> Ends started ~<s:bright]~<f:green]\u2713~<s:reset_all]")
+
+	cluster = network_random(sender.port, random.randrange(10,12))
+	print("\n\t=> Done creating the cluster ~<s:bright]~<f:green]\u2713~<s:reset_all]")
+	sender.networker.peer_add(("localhost", random.choice(cluster).port))
+	receiver.networker.peer_add(("localhost", random.choice(cluster).port))
+	print("\t=> Connected the Receiver and Sender")
+
+	ttlt = 120
+
+	msgobj = stolas.protocol.Message(ttl = ttlt, channel = "")
+	msgobj.set_payload(b"Moo")
+	print("Sending out: {0}".format(msgobj))
+	sender.message_broadcast(msgobj)
+
+	sint = len(sender.networker.peers)
+	cint = average([len(x.networker.peers) for x in cluster if x.is_alive()])
+	rint = len(receiver.networker.peers)
+
+	j = 1
+	i = 1
+	while os.path.isfile(controlfile):
+		if len(receiver.mpile) > 0:
+			break
+		print("[{0}|{1:.2f}|{2}] Waiting{3}{4}".format(sint, cint, rint, '.' * i, ' ' * (5-i)), end = "\r")
+		time.sleep(0.5)
+
+		sint = len(sender.networker.peers)
+		cint = average([len(x.networker.peers) for x in cluster if x.is_alive()])
+		rint = len(receiver.networker.peers)
+
+		j += 1
+		i = (j%5)
+		if j%ttlt == 0:
+			print("~<s:bright]~<f:red]Failed sending the message \u2717~<s:reset_all]")
+			break
+
+	if j%ttlt != 0 and os.path.isfile(controlfile):
+		print(" " * 10, end = "\r")
+		print("\t=> Message Received ~<f:green]~<s:bright]\u2713~<s:reset_all]       ")
+	else:
+		print("\t=> Leaving anyways ~<s:bright]~<f:red]\u2717~<s:reset_all]")
+	network_collapse(cluster)
+
+	sender.stop()
+	sender.join()
+
+	receiver.stop()
+	receiver.join()
+
+	if os.path.isfile(controlfile):
+		os.remove(controlfile)
+	print("Done")
+
 if __name__ == '__main__':
 	if len(argv) == 1:
+		print("Tell me?")
 		pass
 
 	if argv[1] == "cluster":
@@ -116,3 +188,9 @@ if __name__ == '__main__':
 
 	elif argv[1] == "simple":
 		stolas_simple()
+
+	elif argv[1] == "transmission":
+		transmission_test()
+
+	else:
+		print("¯\_(ツ)_/¯")
