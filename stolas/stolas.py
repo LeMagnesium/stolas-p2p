@@ -10,6 +10,7 @@ import logging.handlers	# `logging.handlers.RotatingFileHandler`
 
 import stolas.protocol as protocol
 from stolas.unisocket import UnisocketModel, i2b, b2i
+from .diskcachemanager import GlobalDiskCacheManager as gdcm
 
 randport = lambda: random.randrange(1024, 65536)
 
@@ -18,6 +19,7 @@ class MessagePile:
 		"""Initialize the Message Stack object. Needs no parameters."""
 		self.data = {}
 		self.__lock = threading.Lock()
+		self.cache = gdcm.create_access()
 
 	def __new_msgid(self):
 		"""Internal. Get a new message ID."""

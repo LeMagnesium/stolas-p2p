@@ -11,9 +11,11 @@ import queue		# `queue.Queue`, `queue.Empty`
 import os			# `os.name`
 import random		# `random.randrange`, `random.choice`
 import time
+import zlib
 
 from .protocol import *
 from .utils import b2i, i2b
+from .diskcachemanager import GlobalDiskCacheManager as gdcm
 
 
 class Peer:
@@ -23,7 +25,7 @@ class Peer:
 		self.pid = pid
 		self.thread = thread
 		self.oqueue = b""
-		self.iqueue = b""
+		self.iqueue = gdcm.create_access()
 		self.version = -1
 		self.running = True
 		self.verbinfo = verbinfo
@@ -170,7 +172,7 @@ class UnisocketModel:
 				self.peer_unlock(pid)
 				continue
 
-			peer.iqueue += ddf
+			peer.iqueue.write(ddf)
 			self.logger.debug("[{0}] >> {1}".format(pid, ddf))
 
 			self.parse_packets(pid)
@@ -191,7 +193,9 @@ class UnisocketModel:
 		that they're processed later. Requires the peer's Peer ID."""
 		peer = self.peer_get(peerid)
 		# IMPORTANT: We get a snapshot of the input buffer, not a reference to it. It saves time.
-		data = peer.iqueue
+		peer.iqueue.seek(0)
+		data = peer.iqueue.read() # FIXME: Create proper parsing with GDCM
+		#print("Data length is : {0}".format(len(data)))
 		while data and len(data) > 0:
 			# Just refer to the protocol
 			if data[0] == HELLO_BYTE:
@@ -263,7 +267,11 @@ class UnisocketModel:
 				self.peer_send(peerid, i2b(MALFORMED_DATA) + i2b(len(data), 2))
 				data = b""
 
-		peer.iqueue = data # Refresh the data from our modified snapshot
+		peer.iqueue.seek(0)
+		peer.iqueue.write(data) # Refresh the data from our modified snapshot
+		#print(peer.iqueue.tell())
+		peer.iqueue.truncate()
+		peer.iqueue.seek(0)
 
 	def __listener_thread(self):
 		"""Listening thread. Responsible for the creation of all Peer Threads."""

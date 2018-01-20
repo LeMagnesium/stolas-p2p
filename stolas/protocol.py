@@ -160,6 +160,8 @@ class Message:
 			raise TypeError("Payload must be a byte object")
 		if len(payload) == 0:
 			raise ValueError("Payload must not be empty")
+		elif len(payload) >= 2**28:
+			raise ValueError("Payload must be smaller than 256Mb")
 
 		self.payload = payload
 

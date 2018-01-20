@@ -115,7 +115,7 @@ def transmission_test():
 	print("~<s:bright]Starting Message Transmission Test~<s:reset_all]")
 	controlfile = create_ctrlfile()
 
-	sender = stolas.stolas.Stolas()
+	sender = stolas.stolas.Stolas(logdown=True)
 	receiver = stolas.stolas.Stolas()
 	print("\t=> Ends created ~<s:bright]~<f:green]\u2713~<s:reset_all]")
 
@@ -129,7 +129,7 @@ def transmission_test():
 	receiver.networker.peer_add(("localhost", random.choice(cluster).port))
 	print("\t=> Connected the Receiver and Sender")
 
-	ttlt = 120
+	ttlt = 180
 
 	msgobj = stolas.protocol.Message(ttl = ttlt, channel = "")
 	msgobj.set_payload(b"Moo")
@@ -175,12 +175,25 @@ def transmission_test():
 		os.remove(controlfile)
 	print("Done")
 
+def stolas_caching():
+	from stolas.diskcachemanager import GlobalDiskCacheManager as gdcm
+
+	cache = gdcm.create_access()
+	print(cache)
+
+	cache.write(b"moo")
+	cache.seek(-3, 1)
+	print(cache.read())
+
 if __name__ == '__main__':
 	if len(argv) == 1:
 		print("Tell me?")
 		pass
 
-	if argv[1] == "cluster":
+	if argv[1] == "cache":
+		stolas_caching()
+
+	elif argv[1] == "cluster":
 		stolas_cluster()
 
 	elif argv[1] == "gigacluster":
