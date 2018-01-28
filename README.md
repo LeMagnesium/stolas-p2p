@@ -5,4 +5,5 @@ Primarily intended as an evolved school project, [Stolas](https://fr.wikipedia.o
 ![Stolas](https://upload.wikimedia.org/wikipedia/commons/f/fb/Stolas.jpg)
 
 ### Todo List
- - Move logger utilities higher in the hierarchy
+ - `stolas/betterui.py::pprint`	:	Creare multiple code handling and single-time parsing mechanic
+ - `stolas/protocol.py` and `stolas/unisocket.py` : Discontinue the Death Sequence

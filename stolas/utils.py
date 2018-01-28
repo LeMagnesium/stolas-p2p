@@ -1,8 +1,16 @@
-# Some conversion things
+# ~ stolas/utils.py: Utilities Module ~
+#
+#  This module defines utility functions for repeated operations in
+#   the project's different sections (i.e. byte conversion, etc).
+#
+
 def i2b(n, minimal = -1):
 	"""Integer to Bytes (Big Endian)"""
+	# If the integer is null, just return the empty byte with the desired
+	#  length.
 	if n == 0:
 		return b"\0" if minimal <= 0 else b"\0" * minimal
+
 	b = b""
 	while n > 0:
 		neon = n & 255
@@ -10,9 +18,9 @@ def i2b(n, minimal = -1):
 		b = chr(neon).encode("latin") + b
 		n = n >> 8
 
+	# We add the 0 byte before our chain as many times as needed to
 	if minimal > 0:
-		while len(b) < minimal:
-			b = b"\0" + b
+		b = (b"\0" * (minimal - len(b))) + b
 	return b
 
 def b2i(b):

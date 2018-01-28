@@ -54,6 +54,8 @@ def network_collapse(cluster):
 	i = 1
 	for obj in cluster:
 		obj.stop()
+
+	for obj in cluster:
 		obj.join()
 		print("Terminating model {0}...".format(i), end = "\r")
 		i += 1
@@ -111,6 +113,12 @@ def stolas_simple():
 def average(lst):
 	return sum(lst)/len(lst)
 
+def generate_random_payload():
+	return os.urandom(random.randrange(10, 65000))
+
+def cluster_average_integration(cluster):
+        return average([len(x.networker.peers) for x in cluster if x.is_alive()])
+
 def transmission_test():
 	print("~<s:bright]Starting Message Transmission Test~<s:reset_all]")
 	controlfile = create_ctrlfile()
@@ -129,40 +137,56 @@ def transmission_test():
 	receiver.networker.peer_add(("localhost", random.choice(cluster).port))
 	print("\t=> Connected the Receiver and Sender")
 
-	ttlt = 120
-
-	msgobj = stolas.protocol.Message(ttl = ttlt, channel = "")
-	msgobj.set_payload(b"Moo")
-	print("Sending out: {0}".format(msgobj))
-	sender.message_broadcast(msgobj)
-
+	i = 0
 	sint = len(sender.networker.peers)
 	cint = average([len(x.networker.peers) for x in cluster if x.is_alive()])
 	rint = len(receiver.networker.peers)
+	while not sender.networker.integrated and not receiver.networker.integrated and len([x for x in cluster if x.networker.integrated]) < len(cluster):
+		print("[{0}|{1:.2f}|{2}] Integrating{3}{4}".format(
+			sint, cint, rint,
+			'.' * i,
+			' ' * (5-i)
+		), end = "\r")
+		sint = len(sender.networker.peers)
+		cint = average([len(x.networker.peers) for x in cluster + [sender] if x.is_alive()])
+		rint = len(receiver.networker.peers)
+		i = (i+1)%6
+		time.sleep(0.5)
 
-	j = 1
+	print("=> Integrated ~<s:bright]~<f:green]\u2713~<s:reset_all]" + 17 * ' ')
+
+	ttlt = 120
+
+	globalpayload = generate_random_payload()
+	msgobj = stolas.protocol.Message(ttl = ttlt, channel = "")
+	msgobj.set_payload(globalpayload)
+	print("Sending out: {0}".format(msgobj))
+	sender.message_broadcast(msgobj)
+
+	then = time.time()
 	i = 1
-	while os.path.isfile(controlfile):
+	while True:
 		if len(receiver.mpile) > 0:
+			print(" " * 10, end = "\r")
+			print("\t=> Message Received ~<f:green]~<s:bright]\u2713~<s:reset_all]       ")
 			break
-		print("[{0}|{1:.2f}|{2}] Waiting{3}{4}".format(sint, cint, rint, '.' * i, ' ' * (5-i)), end = "\r")
+		print("[{0}|{1:.2f}|{2}>{3}] Waiting{4}{5}".format(
+			sint, cint, rint, len([x for x in cluster if len(x.mpile) > 0]),
+			'.' * i,
+			' ' * (5-i)
+		), end = "\r")
 		time.sleep(0.5)
 
 		sint = len(sender.networker.peers)
-		cint = average([len(x.networker.peers) for x in cluster if x.is_alive()])
+		cint = average([len(x.networker.peers) for x in cluster + [sender] if x.is_alive()])
 		rint = len(receiver.networker.peers)
 
-		j += 1
-		i = (j%5)
-		if j%ttlt == 0:
+		i = (i+1)%5
+		if time.time() - then >= ttlt or not os.path.isfile(controlfile):
 			print("~<s:bright]~<f:red]Failed sending the message \u2717~<s:reset_all]")
+			print("\t=> Leaving anyways ~<s:bright]~<f:red]\u2717~<s:reset_all]")
 			break
 
-	if j%ttlt != 0 and os.path.isfile(controlfile):
-		print(" " * 10, end = "\r")
-		print("\t=> Message Received ~<f:green]~<s:bright]\u2713~<s:reset_all]       ")
-	else:
-		print("\t=> Leaving anyways ~<s:bright]~<f:red]\u2717~<s:reset_all]")
 	network_collapse(cluster)
 
 	sender.stop()
