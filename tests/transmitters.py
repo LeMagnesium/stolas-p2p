@@ -119,7 +119,7 @@ def generate_random_payload():
 def cluster_average_integration(cluster):
         return average([len(x.networker.peers) for x in cluster if x.is_alive()])
 
-def transmission_test():
+def test_transmission():
 	print("~<s:bright]Starting Message Transmission Test~<s:reset_all]")
 	controlfile = create_ctrlfile()
 
@@ -165,10 +165,12 @@ def transmission_test():
 
 	then = time.time()
 	i = 1
+	worked_out_fine = False
 	while True:
 		if len(receiver.mpile) > 0:
 			print(" " * 10, end = "\r")
 			print("\t=> Message Received ~<f:green]~<s:bright]\u2713~<s:reset_all]       ")
+			worked_out_fine = True
 			break
 		print("[{0}|{1:.2f}|{2}>{3}] Waiting{4}{5}".format(
 			sint, cint, rint, len([x for x in cluster if len(x.mpile) > 0]),
@@ -198,6 +200,7 @@ def transmission_test():
 	if os.path.isfile(controlfile):
 		os.remove(controlfile)
 	print("Done")
+	return worked_out_fine # We're a unit test
 
 if __name__ == '__main__':
 	if len(argv) == 1:
@@ -214,7 +217,7 @@ if __name__ == '__main__':
 		stolas_simple()
 
 	elif argv[1] == "transmission":
-		transmission_test()
+		test_transmission()
 
 	else:
 		print("¯\_(ツ)_/¯")
