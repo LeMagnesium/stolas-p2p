@@ -260,7 +260,10 @@ class UnisocketModel:
 				data = b""
 
 			else:
-				self.peer_send(peerid, i2b(MALFORMED_DATA) + i2b(len(data), 2))
+				paylen = i2b(len(data), 2)
+				if paylen >= 2**16:
+					paylen = (2**16)-1
+				self.peer_send(peerid, i2b(MALFORMED_DATA) + paylen)
 				data = b""
 
 		peer.iqueue = data # Refresh the data from our modified snapshot
