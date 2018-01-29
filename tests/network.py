@@ -66,7 +66,7 @@ def build_network(start_port, total = None):
 		port += 1
 
 		models.append(n)
-	print()
+	print("")
 
 	return models
 
@@ -108,8 +108,9 @@ def test_network_integration_and_collapsing():
 
 	print("Readying...")
 	print("Ready! ~<f:green]~<s:bright]\u2713~<s:reset_all]")
-	print("Now is : {0}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(time.time()))))
 	now = time.time()
+	print("Now is : {0}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(now))))
+	maxtime = now + len(models) * 5 # Maximum time allowed
 	# We shall wait for all peers to be integrated
 	i = 0
 	while False in [m.integrated for m in models]:
@@ -120,11 +121,16 @@ def test_network_integration_and_collapsing():
 	total_time = time.time() - now
 	print("Network has fully integrated ~<s:bright]~<f:green]\u2713~<s:reset_all]")
 	print("It took : {0:.2f}s ({1}s per peer)".format(total_time, total_time/len(models)))
+	worked_out_fine = total_time <= maxtime - now
+	if not worked_out_fine:
+		print("~<s:bright]~<f:red]Network took too long. \u2717~<s:reset_all]")
 	print("Now killing all models")
 	collapse_network(models)
 	print("Stopped")
 	assert(threading.active_count() == 1)
 	os.remove(portfile)
+
+	return worked_out_fine # We're a test unit
 
 def manual_stolas_prompt(eh):
 	while eh.running and eh.networker.running:
@@ -165,7 +171,7 @@ def manual_stolas_prompt(eh):
 		elif csplit[0] == "haddaway":
 			eh.networker.peerlock.acquire()
 			for peer in eh.networker.peers:
-				eh.networker.peer_send(peer, eh.networker.death_sequence)
+				eh.networker.raw_peer_send(peer, eh.networker.death_sequence)
 			eh.networker.peerlock.release()
 			time.sleep(1)
 

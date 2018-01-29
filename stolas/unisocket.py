@@ -221,21 +221,21 @@ class UnisocketModel:
 				data = data[1:]
 
 			elif data[0] == MESSAGE_BYTE:
-				if len(data) < 3:
+				if len(data) < 4:
 					break
 
-				payload_len = b2i(data[1:3])
-				if len(data) < 3 + payload_len:
+				payload_len = b2i(data[1:4])
+				if len(data) < 4 + payload_len:
 					break
 
-				self.iqueue.put((data[:3+payload_len], peerid))
-				data = data[3 + payload_len:]
+				self.iqueue.put((data[:4+payload_len], peerid))
+				data = data[4 + payload_len:]
 
 			elif data[0] == MESSAGEACK_BYTE:
-				if len(data) < 3:
+				if len(data) < 4:
 					break
-				self.iqueue.put((data[:3], peerid))
-				data = data[3:]
+				self.iqueue.put((data[:4], peerid))
+				data = data[4:]
 
 			elif data[0] == MALFORMED_DATA:
 				if len(data) < 3:
@@ -263,7 +263,7 @@ class UnisocketModel:
 				paylen = i2b(len(data), 2)
 				if paylen >= 2**16:
 					paylen = (2**16)-1
-				self.peer_send(peerid, i2b(MALFORMED_DATA) + paylen)
+				self.peer_send(peerid, MALFORMED_DATA, paylen)
 				data = b""
 
 		peer.iqueue = data # Refresh the data from our modified snapshot
@@ -335,7 +335,7 @@ class UnisocketModel:
 		self.peers[npid].thread.start()
 		if advertise and self.listen:
 			self.peers[npid].listen = verbinfo
-			self.peer_send(npid, i2b(ADVERTISE_BYTE) + b"\0" + i2b(self.port, 2))
+			self.peer_send(npid, ADVERTISE_BYTE, b"\0" + i2b(self.port, 2))
 		self.peerlock.release()
 
 		return npid
@@ -406,13 +406,16 @@ class UnisocketModel:
 			pass
 		self.logger.debug("Left the join process")
 
-	def peer_send(self, pid, data):
+	def raw_peer_send(self, pid, data):
 		peer = self.peer_get(pid)
 		if peer == None:
 			return False
 
 		peer.oqueue += data
 		return len(data)
+
+	def peer_send(self, pid, header, data):
+		self.raw_peer_send(pid, i2b(header) + data)
 
 	def integrate(self):
 		# Detect a lack of network integration and ask for peers
@@ -509,7 +512,7 @@ class UnisocketModel:
 				possibles = [peer for peer in self.peers if self.peers[peer].listen != None]
 				if possibles == []:
 					self.peerlock.release()
-					#self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3)
+					#self.peer_send(pid, SHAREPEER_BYTE, b"\0" * 3)
 					# For now do not respond
 					continue
 
@@ -522,18 +525,18 @@ class UnisocketModel:
 					addr_len = i2b(len(verbinfo[0]))
 
 					port = i2b(verbinfo[1], 2)
-					self.peer_send(pid, i2b(SHAREPEER_BYTE) + addr_len + verbinfo[0].encode("utf8") + port)
+					self.peer_send(pid, SHAREPEER_BYTE, addr_len + verbinfo[0].encode("utf8") + port)
 					self.peer_unlock(rpid)
 				else:
 					self.logger.info("Refused to send {0}".format(rpid))
-					#self.peer_send(pid, i2b(SHAREPEER_BYTE) + b"\0" * 3) See 517
+					#self.peer_send(pid, SHAREPEER_BYTE, b"\0" * 3) See 517
 
 			elif data[0] == MESSAGE_BYTE: # Message Arrival Byte
-				payload_len = b2i(data[1:3])
-				msg = data[3:3+payload_len]
+				payload_len = b2i(data[1:4])
+				msg = data[4:4+payload_len]
 				self.logger.info("Received '{0}' from {1}".format(msg, pid))
 				self.imessages.put(("message", msg))
-				self.peer_send(pid, i2b(MESSAGEACK_BYTE) + i2b(payload_len, 2))
+				self.peer_send(pid, MESSAGEACK_BYTE, i2b(payload_len, 3))
 
 			elif data[0] == MESSAGEACK_BYTE: # Message acknowledgement
 				self.imessages.put(("ack", b2i(data[1:])))

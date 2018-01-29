@@ -211,13 +211,13 @@ class Stolas:
 	def message_broadcast(self, msgobj):
 		data = msgobj.implode()
 
-		payload_len = i2b(len(data), 2)
+		payload_len = i2b(len(data), 3)
 		if payload_len == b"\0\0":
 			return False
 
 		self.networker.peerlock.acquire()
 		for peerid in self.networker.peers:
-			self.networker.peer_send(peerid, i2b(protocol.MESSAGE_BYTE) + payload_len + data)
+			self.networker.peer_send(peerid, protocol.MESSAGE_BYTE, payload_len + data)
 		self.networker.peerlock.release()
 		if not msgobj in self.mpile and msgobj.is_alive():
 			mid = self.mpile.add(msgobj)
