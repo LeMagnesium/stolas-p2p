@@ -96,7 +96,7 @@ else:
 from os import name as osname
 
 # A wrapper around print where we do our business
-def pprint(value = None, **kwargs):
+def pprint(value = "", **kwargs):
 	"""A wrapper around print created to parse and replace betterui's console
 	altering codes before feeding them to the normal print function. It is
 	recommended, for easy compatibility, to import this specific method as
