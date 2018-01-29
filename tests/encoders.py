@@ -22,5 +22,7 @@ def test_encoders():
 		#time.sleep(0.1)
 	print("Encoders and decoders ~<s:bright]~<f:green]OK \u2713~<s:reset_all]")
 
+	return True # We're a test unit
+
 if __name__ == "__main__":
 	test_encoders()
