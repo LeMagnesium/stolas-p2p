@@ -96,12 +96,12 @@ else:
 from os import name as osname
 
 # A wrapper around print where we do our business
-def pprint(value = "", **kwargs):
+def pprint(*value, sep = ' ', end = '\n', flush = False, file = None):
 	"""A wrapper around print created to parse and replace betterui's console
 	altering codes before feeding them to the normal print function. It is
 	recommended, for easy compatibility, to import this specific method as
 	'print' in your code."""
-	pstring = str(value)
+	pstring = sep.join([str(x) for x in value])
 
 	# Filter out all that is not ASCII if we're on Windows
 	# Chances are that code is run from CMD on a school computer and those
@@ -115,8 +115,50 @@ def pprint(value = "", **kwargs):
 	# FIXME: It is also possible this section is making the CLI lag in CMD
 	# FIXME: Create multi handling and single-time parsing mechanic
 	if pstring.find("~<") != -1:
-		for code in pretty_printing:
-			for variant in pretty_printing[code]:
-				pstring = pstring.replace("~<{0}:{1}]".format(code, variant), pretty_printing[code][variant])
+		#for code in pretty_printing:
+		#	for variant in pretty_printing[code]:
+		#		pstring = pstring.replace("~<{0}:{1}]".format(code, variant), pretty_printing[code][variant])
+		pos = pstring.find("~<")
+		while pos < len(pstring) - 8:
+			# Look for a ~<
+			if pstring[pos] != "~" or pstring[pos+1] != "<" or (pos > 0 and pstring[pos-1] == "\\"):
+				pos += 1
+				continue
 
-	print(pstring, **kwargs)
+			inipos, pos = pos, pos + 2
+
+			# Find all the codes
+			codes = []
+			while True:
+				if pstring[pos] in "fbs":
+					codes.append(pstring[pos])
+					pos += 1
+				else:
+					break
+
+			if len(codes) == 0 or pstring[pos] != ":":
+				continue
+
+			# Find all the modifiers
+			pos += 1
+			mendpos = pstring[pos:].find("]")
+			if mendpos == -1:
+				continue
+
+			mstring = pstring[pos:pos+mendpos]
+			pos += mendpos + 1
+			modifiers = mstring.split(',')
+
+			pstring = pstring[:inipos] + pstring[pos:]
+			pos = inipos
+			for code, modifier in zip(codes, modifiers):
+				if not pretty_printing.get(code) or not pretty_printing[code].get(modifier):
+					continue
+				colorcode = pretty_printing[code][modifier]
+				pstring = pstring[:pos] + colorcode + pstring[pos:]
+				pos += len(colorcode)
+
+	if file == None:
+		print(pstring, end = end, flush = flush)
+	else:
+		print(pstring, end = end, flush = flush, file = file)
