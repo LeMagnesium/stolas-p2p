@@ -47,7 +47,7 @@ def show_size(size):
 	elif slog < 40:
 		return "{0:d}Gb".format(int(size/2**30))
 
-def test_compression_advantages(upperb = 2**24):
+def test_compression_advantages(upperb = 2**20):
 	lowerb = 2**8
 	pld = b""
 	genreal = True
@@ -66,6 +66,7 @@ def test_compression_advantages(upperb = 2**24):
 		assert(upc < len(pld))
 		show_comprs(lowerb, upc, then)
 		lowerb *= 2
+	return True
 
 if __name__ == "__main__":
 	test_compression_advantages()
