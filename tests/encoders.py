@@ -20,7 +20,8 @@ def test_encoders():
 			print("~<s:bright]~<f:red]Error with encoders : program aborted~<s:reset_all]")
 			raise
 		#time.sleep(0.1)
-	print("Encoders and decoders ~<s:bright]~<f:green]OK \u2713~<s:reset_all]")
+	print("Encoders and decoders ~<sf:bright,green]OK \u2713~<s:reset_all]")
+	# ~:22
 
 	return True # We're a test unit
 
