@@ -5,11 +5,6 @@ from markovgenerator import MarkovGenerator
 
 monster = MarkovGenerator()
 
-def gen_payload(size):
-	# Most of our big payloads will have a lot of randomized junk...
-	# ...Yet most of our packets will be small
-	return os.urandom(size)
-
 def gen_real_payload(size, remnant = b""):
 	payload = remnant
 	delta = 0
@@ -17,23 +12,25 @@ def gen_real_payload(size, remnant = b""):
 	then = time.time()
 	plsize = len(payload)
 	qtt = 35
-	while plsize < size:
-		for char in monster.puke():
+	while plsize < size: # <- Technically useless
+		for char in monster.puke(size):
 			payload += char.encode("utf8")
 			plsize += 1
 			delta = (delta + 1)%threshold
-			if delta == 0:
-				dtime = time.time() - then
+			dtime = time.time() - then
+			if delta == 0 and dtime > 0:
 				pct = int(plsize/size * qtt)
 				if pct >= qtt:
 					pct = qtt
-				print("[{0}{1}]{2:3.0f}Kb/s".format(
+				print("[{0}{1}] {2:6s}   ".format(
 					pct * '=',
 					(qtt - pct) * ' ',
-					threshold/dtime / 1024
+					show_size(threshold/dtime) + "/s"
 				), end = "\r")
 				then = time.time()
 
+			if plsize > size:
+				break
 	return payload[:size]
 
 def show_comprs(size, csize, time = 0):
@@ -50,10 +47,8 @@ def show_size(size):
 	elif slog < 40:
 		return "{0:d}Gb".format(int(size/2**30))
 
-def test_compression_advantages():
-	upperb = 2**24
-	lowerb = 2**0
-
+def test_compression_advantages(upperb = 2**24):
+	lowerb = 2**8
 	pld = b""
 	genreal = True
 	while lowerb <= upperb:
@@ -67,6 +62,8 @@ def test_compression_advantages():
 		except RuntimeError:
 			print("Unable to use pseudo-real text generation. Please run tests/markovgenerator.py to feed the generator first.")
 			break
+
+		assert(upc < len(pld))
 		show_comprs(lowerb, upc, then)
 		lowerb *= 2
 

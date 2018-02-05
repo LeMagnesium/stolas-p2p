@@ -27,7 +27,7 @@ class MarkovGenerator:
 		self.indices[antechar]["total"] += 1
 		self.indices[antechar]["_end"] = self.indices[antechar].get("_end", 0) + 1
 
-	def puke(self):
+	def puke(self, minsize = -1):
 		antechar = "_beg"
 		if self.indices.get("_beg") == None:
 			raise RuntimeError("No data loaded! Have you trained the MKvG on HTML files yet?")
@@ -46,9 +46,14 @@ class MarkovGenerator:
 					break
 
 			if chosen_char == '_end':
-				break
+				if minsize == -1 or minsize <= 0:
+					break
+				else:
+					chosen_char = "_beg"
+					continue
 			else:
 				yield chosen_char
+				minsize -= 1
 				antechar = chosen_char
 
 	def save(self):
@@ -58,7 +63,7 @@ def filefindergenerator(root):
 	curtop = root
 	for top, dirs, files in os.walk(curtop):
 		for fl in files:
-			if os.path.splitext(fl)[-1] == ".html":
+			if os.path.splitext(fl)[-1] == ".html" or os.name == "nt" and os.path.splitext(fl)[-1] == ".htm":
 				yield top + os.path.sep + fl
 
 def show_help():
@@ -92,9 +97,10 @@ def main():
 
 	elif sys.argv[1] == "puke" and len(sys.argv) > 2:
 		mkvg = MarkovGenerator()
-		outp = open(sys.argv[2], "w")
+		outp = open(sys.argv[2], "wb")
 		for char in mkvg.puke():
-			outp.write(char)
+			outp.write(char.encode("utf8"))
+			
 		outp.close()
 
 	elif sys.argv[1] == "help":
