@@ -13,6 +13,7 @@ import stolas.protocol
 from stolas.betterui import pprint as print
 
 from network import manual_stolas_prompt
+from common import network_collapse
 
 def network_random(port, quantity = None):
 	ports = []
@@ -26,21 +27,22 @@ def network_random(port, quantity = None):
 			try:
 				stols = stolas.stolas.Stolas(port = cport)
 				stols.start()
-			except OSError:
-				cport += 1
-				continue
-			else:
 				if len(ports) > 0:
 					rport = random.choice(ports)
 					pid = stols.networker.peer_add(("127.0.0.1", rport))
 
-				print("Created model {0}...".format(n+1), end = "\r")
+				print("Created model {0}/{1}...".format(n+1, quantity), end = "\r")
+				ports.append(cport)
+				cport += 1
+				objects.append(stols)
 				break
 
-		cport += 1
-		ports.append(cport)
-		objects.append(stols)
+			except OSError:
+				cport += 1
+				continue
 
+	# Assert that every single object is connected to another one
+	assert(len([x for x in objects if len(x.networker.peers) == 0]) == 0)
 	return objects
 
 def create_ctrlfile():
@@ -49,17 +51,6 @@ def create_ctrlfile():
 	open(controlfile, "w")
 	print("~<s:bright]Remove the control file at any time to collapse the cluster.~<s:reset_all]")
 	return controlfile
-
-def network_collapse(cluster):
-	i = 1
-	for obj in cluster:
-		obj.stop()
-
-	for obj in cluster:
-		obj.join()
-		print("Terminating model {0}...".format(i), end = "\r")
-		i += 1
-	print("\nAll models terminated")
 
 def stolas_cluster():
 	rport = random.randrange(1024, 65400)
@@ -125,35 +116,35 @@ def test_transmission():
 
 	sender = stolas.stolas.Stolas()
 	receiver = stolas.stolas.Stolas()
-	print("\t=> Ends created ~<s:bright]~<f:green]\u2713~<s:reset_all]")
+	print("\t=> Ends created ~<sf:bright,green]\u2713~<s:reset_all]")
 
 	sender.start()
 	receiver.start()
-	print("\t=> Ends started ~<s:bright]~<f:green]\u2713~<s:reset_all]")
+	print("\t=> Ends started ~<sf:bright,green]\u2713~<s:reset_all]")
 
-	cluster = network_random(sender.port, random.randrange(10,12))
-	print("\n\t=> Done creating the cluster ~<s:bright]~<f:green]\u2713~<s:reset_all]")
+	cluster = network_random(sender.port+1, random.randrange(10,12))
+	print("\n\t=> Done creating the cluster ~<sf:bright,green]\u2713~<s:reset_all]")
 	sender.networker.peer_add(("localhost", random.choice(cluster).port))
 	receiver.networker.peer_add(("localhost", random.choice(cluster).port))
 	print("\t=> Connected the Receiver and Sender")
 
-	i = 0
-	sint = len(sender.networker.peers)
-	cint = average([len(x.networker.peers) for x in cluster if x.is_alive()])
-	rint = len(receiver.networker.peers)
-	while not sender.networker.integrated and not receiver.networker.integrated and len([x for x in cluster if x.networker.integrated]) < len(cluster):
+	i, sint, cint, mint, rint = 0, 0, 0, 0, 0
+	while not sender.networker.integrated or not receiver.networker.integrated or len([x for x in cluster if x.networker.integrated]) < len(cluster):
 		print("[{0}|{1:.2f}|{2}] Integrating{3}{4}".format(
-			sint, cint, rint,
+			sint, mint, rint,
 			'.' * i,
 			' ' * (5-i)
 		), end = "\r")
 		sint = len(sender.networker.peers)
-		cint = average([len(x.networker.peers) for x in cluster + [sender] if x.is_alive()])
+		mint = min([len(x.networker.peers) for x in cluster + [sender] if x.is_alive()])
 		rint = len(receiver.networker.peers)
 		i = (i+1)%6
 		time.sleep(0.5)
 
 	print("=> Integrated ~<s:bright]~<f:green]\u2713~<s:reset_all]" + 17 * ' ')
+	assert(receiver.networker.integrated)
+	assert(sender.networker.integrated)
+	assert(len([True for x in cluster if x.networker.integrated]) == len(cluster))
 
 	ttlt = 120
 
@@ -173,7 +164,7 @@ def test_transmission():
 			worked_out_fine = True
 			break
 		print("[{0}|{1:.2f}|{2}>{3}] Waiting{4}{5}".format(
-			sint, cint, rint, len([x for x in cluster if len(x.mpile) > 0]),
+			sint, cint, rint, len([x for x in cluster + [receiver] if len(x.mpile) > 0]),
 			'.' * i,
 			' ' * (5-i)
 		), end = "\r")

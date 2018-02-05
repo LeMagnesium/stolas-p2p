@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# -*- encoding: utf8 -*-
+# -*- encoding: utf-8 -*-
 
 import time
 import os, os.path
@@ -12,6 +12,8 @@ from stolas.betterui import pprint as print
 from stolas.stolas import Stolas
 from stolas.unisocket import UnisocketModel
 from stolas.protocol import Message
+
+from common import network_collapse
 
 def run_stolas():
 	port = None
@@ -26,87 +28,61 @@ def run_stolas():
 	eh.stop()
 	eh.join()
 
-
-def __send_shutdown(obj):
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.connect(('127.0.0.1', obj.port))
-	s.send(obj.networker.death_sequence + b"\x02")
-	s.close()
-	print("Network is about to collapse...")
-
 def __trigger_connection(n, host):
 	import time
-	time.sleep(1)
+	time.sleep(0.4)
 	try:
 		n.peer_add(host)
 	except:
 		pass
+	assert(len(n.peers) > 0)
 
-def build_network(start_port, total = None):
-	models = []
-	ports = [start_port]
-	port = start_port
-	total = total or random.randrange(5, 10)
-	for progress in range(total):
+def build_network(port, quantity = None):
+	ports = []
+	cport = port
+	objects = []
+	if quantity == None:
+		quantity = random.randrange(5,7)
+
+	for n in range(quantity):
 		while True:
-			n = UnisocketModel(port, name = str(port-start_port)) # Should fail the first time
 			try:
-				n.start()
-			except OSError:
-				n.stop() # FFS just let any ghost thread die, in case
-				port += 1
-				continue
-			else:
-				if port > start_port:
-					tr = threading.Thread(target = __trigger_connection, args = (n, ("127.0.0.1", random.choice(ports))))
-					tr.start()
-				ports.append(port)
+				stols = UnisocketModel(port = cport, name = len(ports))
+				stols.start()
+				if len(ports) > 0:
+					rport = random.choice(ports)
+					pid = stols.peer_add(("127.0.0.1", rport))
+
+				print("Created model {0}/{1}...".format(n+1, quantity), end = "\r")
+				ports.append(cport)
+				cport += 1
+				objects.append(stols)
 				break
-		print("Connected peer {0}/{1}  ".format(progress+1, total), end = "\r")
-		port += 1
 
-		models.append(n)
-	print("")
+			except OSError:
+				cport += 1
+				continue
 
-	return models
+	# Assert that every object is connected to at least another one
+	assert(len([x for x in objects if len(x.peers) == 0]) == 0)
+	return objects
 
-def prepare_logging_locations():
-	logfile, portfile = "/tmp/unisocket_logs", "/tmp/unisocket_port"
-	if os.name == "nt":
-		# Windows
-		logfile, portfile = "unisocket_logs", "unisocket_port"
-	elif os.name == "java":
-		# I have no fucken' idea. Android?
-		print("I don't know that system")
-		assert(False)
-
-	return portfile, logfile
-
-def collapse_network(models):
-	i = 1
-	for obj in models:
-		print("Sending termination to model {0}".format(i), end = "\r")
-		obj.stop()
-		print("Joining model {0} ({1})...".format(i, type(obj)), end = "\r")
-		obj.join()
-		print("Model {0} terminated".format(i), end = "\r")
-		i += 1
-	print()
 
 def test_network_integration_and_collapsing():
 	import time
-	portfile, logfile = prepare_logging_locations()
 
 	threading.current_thread().setName("Main__")
 	port = random.randrange(1024, 65500)
-	open(portfile, "w").write(str(port))
-	open(logfile, "w")
 
 	print("Started on port {0}".format(port))
 
 	models = build_network(port, random.randrange(10, 20))
 
 	print("Readying...")
+	print("Asserting that the network is correct...", end = "")
+	assert(len([x for x in models if len(x.peers) == 0]) == 0)
+	print("~<s:bright]~<f:green]\u2713~<s:reset_all]")
+
 	print("Ready! ~<f:green]~<s:bright]\u2713~<s:reset_all]")
 	now = time.time()
 	print("Now is : {0}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(now))))
@@ -125,10 +101,9 @@ def test_network_integration_and_collapsing():
 	if not worked_out_fine:
 		print("~<s:bright]~<f:red]Network took too long. \u2717~<s:reset_all]")
 	print("Now killing all models")
-	collapse_network(models)
+	network_collapse(models)
 	print("Stopped")
 	assert(threading.active_count() == 1)
-	os.remove(portfile)
 
 	return worked_out_fine # We're a test unit
 
