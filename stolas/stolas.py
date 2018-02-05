@@ -109,6 +109,15 @@ class Stolas:
 		self.mpile = MessagePile()
 		self.distribution_timer = 10
 
+	def __repr__(self):
+		return "Stolas(name='{0}',port='{1}')".format(self.name, self.port)
+
+	def __del__(self):
+		del self.networker
+		if getattr(self, "mpile", None) != None:
+			del self.mpile
+		self.logger.debug("Stolas object deleted")
+
 	def __logging_setup(self):
 		logfile = "stolas_logs"
 
@@ -142,12 +151,6 @@ class Stolas:
 		self.logger.addHandler(file_lo)
 
 		self.logger.debug("Logger Ready")
-
-	def __del__(self):
-		del self.networker
-		if getattr(self, "mpile", None) != None:
-			del self.mpile
-		self.logger.debug("Stolas object deleted")
 
 	def stop(self):
 		self.running = False

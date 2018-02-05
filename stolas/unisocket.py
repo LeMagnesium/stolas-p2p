@@ -99,7 +99,11 @@ class UnisocketModel:
 		)
 
 	def __del__(self):
-		self.logger.debug("UniSocket model deleted")
+		#self.logger.debug("UniSocket model deleted")
+		pass
+
+	def __repr__(self):
+		return "UniSocket(name='{0}', port='{1}')".format(self.name, self.port)
 
 	def __nametag(self):
 		"""Return the nametag for our object, appended to the Thread Name Roots"""
@@ -130,6 +134,8 @@ class UnisocketModel:
 			if len(peer.oqueue) > 0:
 				try:
 					sock.send(peer.oqueue)
+				except BlockingIOError:
+					continue
 				except BrokenPipeError:
 					self.logger.warning("BROKEN Pipe! Connection with peer {0} broken".format(pid))
 					self.peer_unlock(pid)

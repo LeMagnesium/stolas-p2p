@@ -1,6 +1,9 @@
+*~
+stolas_tucrash_*
 __pycache__/
 stolas.egg-info/
 unisocket_logs
 unisocket_port
 *.ctrl
 htmlgen.json
+package-lock.json
