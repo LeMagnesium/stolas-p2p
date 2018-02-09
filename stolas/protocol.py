@@ -28,6 +28,7 @@ from hashlib import sha512   # Required for uing generation
 import time                  # `time.time`
 import os                    # `os.urandom`
 import random                # `random.randrange`
+import zlib
 
 from .utils import b2i, i2b
 
@@ -100,6 +101,8 @@ class Message:
 		data += self.channel.encode("utf8")
 		data += self.payload
 
+		data = zlib.compress(data)
+
 		# Since the payload size is encoded on three bytes in a message packet,
 		#  we must ensure our data is correctly divided
 		if len(data) >= 2**24:
@@ -124,6 +127,7 @@ class Message:
 			raise ValueError("Malformed message data")
 
 		self = Message()
+		data = zlib.decompress(data)
 		self.__usig = data[:64]
 		data = data[64:]
 		self.set_timestamp(b2i(data[:8]))
