@@ -13,7 +13,7 @@ import stolas.protocol
 from stolas.betterui import pprint as print
 
 from network import manual_stolas_prompt
-from common import network_collapse
+from common import network_collapse, mean
 
 def network_random(port, quantity = None):
 	ports = []
@@ -101,14 +101,11 @@ def stolas_simple():
 	slobj.join()
 	print("Done")
 
-def average(lst):
-	return sum(lst)/len(lst)
-
 def generate_random_payload():
 	return os.urandom(random.randrange(10, 65000))
 
 def cluster_average_integration(cluster):
-        return average([len(x.networker.peers) for x in cluster if x.is_alive()])
+        return mean([len(x.networker.peers) for x in cluster if x.is_alive()])
 
 def test_transmission():
 	print("~<s:bright]Starting Message Transmission Test~<s:reset_all]")
@@ -171,7 +168,7 @@ def test_transmission():
 		time.sleep(0.5)
 
 		sint = len(sender.networker.peers)
-		cint = average([len(x.networker.peers) for x in cluster + [sender] if x.is_alive()])
+		cint = mean([len(x.networker.peers) for x in cluster + [sender] if x.is_alive()])
 		rint = len(receiver.networker.peers)
 
 		i = (i+1)%5

@@ -24,6 +24,8 @@ def swap_out():
 	sys.stdout = StringIO()
 	return stdout
 
+def mean(lst):
+	return sum(lst)/len(lst)
 
 ##########################################
 # Old Functions
