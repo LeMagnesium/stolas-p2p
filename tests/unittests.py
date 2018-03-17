@@ -3,7 +3,6 @@ import time, sys
 from stolas.betterui import pprint as print
 from common import swap_in, swap_out
 
-
 def run_test_unit(title, function):
 	print("~<s:bright]=> ~<f:blue]{}~<s:reset_all] ".format(title), end = "")
 	stdout = swap_out()

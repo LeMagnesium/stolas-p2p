@@ -30,6 +30,12 @@ pretty_printing = {
 }
 
 #	#	#
+# We must know our system since windows's CMD is *somehow* still unable to
+#  handle anything other than ASCII (and especially not multibyte characters).
+#
+from os import name as osname
+
+#	#	#
 # Readline lets us use a history file as well as the arrow and backspace keys
 # It's quite interesting to have right now with our minimalistic CLI interface
 # However, if readline's import were to fail (on Windows for example), we would
@@ -88,12 +94,6 @@ else:
 			"reset_all": colorama.Style.RESET_ALL
 		}
 	}
-
-#	#	#
-# We must know our system since windows's CMD is *somehow* still unable to
-#  handle anything other than ASCII (and especially not multibyte characters).
-#
-from os import name as osname
 
 # A wrapper around print where we do our business
 def pprint(*value, sep = ' ', end = '\n', flush = False, file = None):
