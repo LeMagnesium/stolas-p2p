@@ -64,7 +64,10 @@ class Ui_Form(QtWidgets.QMainWindow):
 	_storage_directory = find_storage_directory()
 	def setupUi(self):
 		# Here be database stuff
-		self.conn = sqlite3.connect(self._storage_directory + os.sep + 'data.db')
+		if not os.path.isdir(self._storage_directory):
+			os.mkdir(self._storage_directory)
+
+		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
 		self.cursor = self.conn.cursor()
 		self.cursor.execute('''CREATE TABLE IF NOT EXISTS inbox(
 		     uuid TEXT PRIMARY KEY,
@@ -136,7 +139,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.cursor.execute("""SELECT uuid, timestamp, channel, message FROM inbox""")
 		rows = self.cursor.fetchall()
 		for row in rows:
-			self.recent_msg = self.format_message_entry(row[1], row[2], row[3])
+			self.recent_msg = self.format_message_entry(row[1], row[2], row	[3])
 			self.listView.addItem(self.recent_msg)
 
 	def close_stolas(self):
