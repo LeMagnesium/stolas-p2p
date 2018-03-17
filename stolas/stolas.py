@@ -9,11 +9,12 @@ import logging			# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler
 import logging.handlers	# `logging.handlers.RotatingFileHandler`
 
 import stolas.protocol as protocol
-from stolas.unisocket import UnisocketModel, i2b, b2i
+from stolas.unisocket import UnisocketModel, i2b, b2i, PhantomLogger
 
 randport = lambda: random.randrange(1024, 65536)
 
 class MessagePile:
+	on_add_callbacks = []
 	def __init__(self):
 		"""Initialize the Message Stack object. Needs no parameters."""
 		self.data = {}
@@ -33,6 +34,9 @@ class MessagePile:
 	def __len__(self):
 		return len(self.data)
 
+	def register_on_add(self, func):
+		self.on_add_callbacks.append(func)
+
 	def add(self, message):
 		"""Add a message onto the pile. Expects a stolas.protocol.Message object."""
 		if message == None or not isinstance(message, protocol.Message):
@@ -47,6 +51,8 @@ class MessagePile:
 			nmid = self.__new_msgid()
 			self.data[nmid] = message
 			self.__lock.release()
+			for callback in self.on_add_callbacks:
+				callback(message)
 			return nmid
 
 	def get(self, message_id, alternative = None):
@@ -91,12 +97,16 @@ class Stolas:
 		if self.name == None:
 			self.name = hex(random.randrange(pow(16,8),pow(16,16)))[2:10]
 
-		self.__logging_setup()
+		if kwargs.get("logging", False):
+			self.__logging_setup()
+		else:
+			self.logger = PhantomLogger()
 
 		if kwargs.get("logdown", False):
 			self.networker = UnisocketModel(self.port, name = "US," + self.name, logger = self.logger)
 		else:
 			self.networker = UnisocketModel(self.port, name = "US," + self.name)
+
 		self.networker.start()
 
 		self.processor = threading.Thread(
@@ -114,9 +124,9 @@ class Stolas:
 
 	def __del__(self):
 		del self.networker
+		#self.logger.debug("Stolas object deleted")
 		if getattr(self, "mpile", None) != None:
 			del self.mpile
-		self.logger.debug("Stolas object deleted")
 
 	def __logging_setup(self):
 		logfile = "stolas_logs"

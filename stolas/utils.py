@@ -30,3 +30,15 @@ def b2i(b):
 		n += bt
 		n = n << 8
 	return n >> 8
+
+class PhantomLogger:
+	def debug(msg, *args, **kwargs):
+		pass
+
+	def warning(msg, *args, **kwargs):
+		pass
+
+	def info(msg, *args, **kwargs):
+		pass
+
+

@@ -13,7 +13,7 @@ import random		# `random.randrange`, `random.choice`
 import time
 
 from .protocol import *
-from .utils import b2i, i2b
+from .utils import b2i, i2b, PhantomLogger
 
 
 class Peer:
@@ -32,16 +32,6 @@ class Peer:
 
 	def __repr__(self):
 		return "Peer(pid={0}, verbinfo={1}, version={2})".format(self.pid, self.verbinfo, self.version)
-
-class PhantomLogger:
-	def debug(msg, *args, **kwargs):
-		pass
-
-	def warning(msg, *args, **kwargs):
-		pass
-
-	def info(msg, *args, **kwargs):
-		pass
 
 
 # Model of UniSocket P2P manager
@@ -144,6 +134,9 @@ class UnisocketModel:
 					self.logger.warning("Connection Reset with Peer {0}".format(pid))
 					self.peer_unlock(pid)
 					break
+				except ConnectionAbortedError:
+					self.logger.warning("Connection Aborted with Peer {0}".format(pid))
+					#FixME: Look for an ancestry "NetworkError" class
 
 				self.logger.debug("[{0}] << {1}".format(pid, peer.oqueue))
 				peer.oqueue = b""
@@ -266,10 +259,10 @@ class UnisocketModel:
 				data = b""
 
 			else:
-				paylen = i2b(len(data), 2)
+				paylen = len(data)
 				if paylen >= 2**16:
 					paylen = (2**16)-1
-				self.peer_send(peerid, MALFORMED_DATA, paylen)
+				self.peer_send(peerid, MALFORMED_DATA, i2b(paylen, 2))
 				data = b""
 
 		peer.iqueue = data # Refresh the data from our modified snapshot
