@@ -5,5 +5,5 @@ stolas.egg-info/
 unisocket_logs
 unisocket_port
 *.ctrl
-htmlgen.json
+*htmlgen.json
 package-lock.json
