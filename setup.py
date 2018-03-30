@@ -12,6 +12,6 @@ setup(
 	description="P2P Communication Client",
 	install_requires = [
 		'PyQt5'
-	]
+	],
 	platforms=["linux", "linux2", "win32", "cygwin"],
 )
