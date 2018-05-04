@@ -1,14 +1,9 @@
-# -*- coding: utf-8 -*-
-
-# Form implementation generated from reading ui file 'Form.ui'
-#
-# Created by: PyQt4 UI code generator 4.11.4
-#
-# WARNING! All changes made in this file will be lost!
+import ctypes
+ctypes.CDLL("libGL.so.1", mode=ctypes.RTLD_GLOBAL)
 
 from PyQt5 import QtCore, QtGui , QtWidgets , QtWebEngineWidgets
 
-from PyQt5.QtWidgets import QWidget, QGridLayout, QPushButton, QApplication, QLineEdit, QMenu, QAction
+from PyQt5.QtWidgets import QAbstractScrollArea, QWidget, QGridLayout, QPushButton, QApplication, QLineEdit, QMenu, QAction, QSplitter
 from PyQt5.QtGui import QIcon
 
 import time
@@ -98,7 +93,11 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.textEdit = QtWidgets.QTextEdit()
 		self.textEdit.setGeometry(QtCore.QRect(20, 260, 291, 31))
 		self.textEdit.setObjectName(_fromUtf8("textEdit"))
-		self.inboxList = QtWidgets.QListWidget()
+		self.inboxTable = QtWidgets.QTableWidget()
+		#from PyQt5.QtWidgets import QSizePolicy
+		self.inboxTable.horizontalHeader().setStretchLastSection(True)
+		from PyQt5.QtWidgets import QAbstractItemView
+		self.inboxTable.setSelectionBehavior(QAbstractItemView.SelectRows)
 
 		self.pushButton.pressed.connect(self.sendmessage)
 
@@ -111,21 +110,33 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.destroyed.connect(self.close_stolas)
 		#self.aboutToQuit.connect(self.close_stolas)
 
-		self.main_layout.addWidget(self.pushButton, 3, 0)
+		"""self.main_layout.addWidget(self.pushButton, 3, 0)
 		#self.main_layout.addWidget(self.pushButton)
 		self.main_layout.addWidget(self.textEdit, 0, 1)
-		self.main_layout.addWidget(self.inboxList, 0, 0, 3, 1)
+		self.main_layout.addWidget(self.inboxTable, 0, 0, 3, 1)
 		#self.main_layout.addWidget(self.inboxList)
 		self.main_layout.addWidget(self.webView, 1, 1, 2, 2)
-		#self.main_layout.addWidget(self.webView)
+		#self.main_layout.addWidget(self.webView)"""
+		splitver = QSplitter()
+		splitver.setOrientation(QtCore.Qt.Vertical)
+		splitver.addWidget(self.textEdit)
+		splitver.addWidget(self.webView)
+		splithor = QSplitter()
+		splithor.addWidget(self.inboxTable)
+		splithor.addWidget(splitver)
+
+		self.main_layout.addWidget(splithor)
 
 		self.create_menubar()
 		self.create_list_view()
 		self.stolas.mpile.register_on_add(lambda x: self.on_new_message(x))
+		print("Hook registration complete")
 
 		#self.retranslateUi()
 		self.setCentralWidget(self.central)
+		print("Central Widget set")
 		QtCore.QMetaObject.connectSlotsByName(self)
+		print("Initialization complete")
 
 	def create_menubar(self):
 		#self.menubar = QtWidgets.QMenuBar(self)
@@ -175,38 +186,37 @@ class Ui_Form(QtWidgets.QMainWindow):
 			print("Added")
 
 	def delete_current_item_from_listview(self):
-		for item in self.inboxList.selectedItems():
-			# Delete from list
-			self.inboxList.takeItem(self.inboxList.row(item))
-			# Delete from db
-			uuid = item.data(QtCore.Qt.UserRole)
-			self.cursor.execute("DELETE from inbox WHERE uuid=?", (uuid,))
-			self.conn.commit()
-
-	def format_message_entry(self, timestamp, channel, content):
-		return "[{0}] {1} - {2}".format(channel,
-			time.strftime("%d/%m/%Y %H:%M", time.localtime(timestamp)),
-			TitleFinder(content.decode("utf8")).get_title_or_None()
-		)
+		pass
+#		for item in self.inboxList.selectedItems():
+#			# Delete from list
+#			self.inboxList.takeItem(self.inboxList.row(item))
+#			# Delete from db
+#			uuid = item.data(QtCore.Qt.UserRole)
+#			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
+#			self.conn.commit()
 
 	def create_list_view(self):
-		self.inboxList.setGeometry(QtCore.QRect(20, 10, 91, 241))
-		self.inboxList.setObjectName(_fromUtf8("listView"))
-		#self.inboxList.setSelectionBehaviour(QAbstractItemView.SelectItems);
-		self.inboxList.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+		self.inboxTable.setGeometry(QtCore.QRect(20, 10, 91, 241))
+		self.inboxTable.setObjectName(_fromUtf8("listTable"))
+		for i in range(3):
+			self.inboxTable.insertColumn(i)
+		self.inboxTable.setHorizontalHeaderLabels(["Channel", "Date", "Title"])
+		#self.inboxTable.setSelectionBehaviour(QAbstractItemView.SelectItems);
+		#self.inboxTable.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
 		self.cursor.execute("""SELECT uuid, timestamp, channel, message FROM inbox""")
 		for row in self.cursor.fetchall():
 			self.add_message_to_listview(row[0], row[1], row[2], row[3])
 		# Signals & Slots
-		self.inboxList.itemSelectionChanged.connect(self.show_message)
+		self.inboxTable.itemSelectionChanged.connect(self.show_message)
+		pass
 
 	def show_message(self):
-		if len(self.inboxList.selectedItems()) == 0:
+		if len(self.inboxTable.selectedItems()) == 0:
 			# The list's empty
 			self.webView.setHtml("")
 			return
 
-		usig = self.inboxList.selectedItems()[0].data(QtCore.Qt.UserRole)
+		usig = self.inboxTable.selectedItems()[0].data(QtCore.Qt.UserRole)
 		print("Querying {}...".format(usig[:50]))
 		self.cursor.execute("""SELECT message FROM inbox WHERE uuid=?""",(usig,))
 		message_var = self.cursor.fetchone()[0]
@@ -220,10 +230,18 @@ class Ui_Form(QtWidgets.QMainWindow):
 
 	def add_message_to_listview(self, usig, timestamp, channel, payload):
 		print("Adding {}...".format(usig[:50]))
-		recent_msg = self.format_message_entry(timestamp, channel, payload)
-		nitem = QtWidgets.QListWidgetItem(recent_msg)
-		nitem.setData(QtCore.Qt.UserRole, usig)
-		self.inboxList.addItem(nitem)
+		row = self.inboxTable.rowCount()
+		self.inboxTable.insertRow(row)
+
+		citem = QtWidgets.QTableWidgetItem(channel)
+		citem.setData(QtCore.Qt.UserRole, usig)
+		self.inboxTable.setItem(row, 0, citem)
+
+		titem = QtWidgets.QTableWidgetItem(time.strftime("%d/%m/%Y %H:%M", time.localtime(timestamp)))
+		self.inboxTable.setItem(row, 1, titem)
+
+		litem = QtWidgets.QTableWidgetItem(TitleFinder(payload.decode("utf8")).get_title_or_None())
+		self.inboxTable.setItem(row, 2, litem)
 
 	def on_new_message(self, message):
 		uuid = message.usig()
@@ -253,7 +271,9 @@ if __name__ == "__main__":
 	app = QApplication(sys.argv)
 	gui = Ui_Form()
 	gui.setupUi()
+	print("Done")
 	gui.show()
+	print("Shown")
 	val = app.exec_()
 	gui.close_stolas()
 	sys.exit(val)
