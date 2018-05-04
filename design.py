@@ -3,7 +3,7 @@ ctypes.CDLL("libGL.so.1", mode=ctypes.RTLD_GLOBAL)
 
 from PyQt5 import QtCore, QtGui , QtWidgets , QtWebEngineWidgets
 
-from PyQt5.QtWidgets import QAbstractScrollArea, QWidget, QGridLayout, QPushButton, QApplication, QLineEdit, QMenu, QAction, QSplitter
+from PyQt5.QtWidgets import QMessageBox, QAbstractScrollArea, QWidget, QGridLayout, QPushButton, QApplication, QLineEdit, QMenu, QAction, QSplitter
 from PyQt5.QtGui import QIcon
 
 import time
@@ -186,14 +186,29 @@ class Ui_Form(QtWidgets.QMainWindow):
 			print("Added")
 
 	def delete_current_item_from_listview(self):
-		pass
-#		for item in self.inboxList.selectedItems():
-#			# Delete from list
-#			self.inboxList.takeItem(self.inboxList.row(item))
-#			# Delete from db
-#			uuid = item.data(QtCore.Qt.UserRole)
-#			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
-#			self.conn.commit()
+		reply = QMessageBox.question(self, "Message Deletion", "Are you sure you want to permanently remove those message?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+		if reply == QMessageBox.No:
+			return
+
+		select = self.inboxTable.selectionModel()
+
+		# Delete from db
+		for item in select.selectedRows():
+			uuid = self.inboxTable.item(item.row(), 0).data(QtCore.Qt.UserRole)
+			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
+			print("Removing", uuid)
+
+		self.conn.commit()
+
+		offset = 0
+		oldrow = -1
+		# Delete from list
+		for item in select.selectedRows():
+			if oldrow == -1:
+				oldrow = item.row()
+			elif oldrow < item.row():
+				offset += 1
+			self.inboxTable.removeRow(item.row() - offset)
 
 	def create_list_view(self):
 		self.inboxTable.setGeometry(QtCore.QRect(20, 10, 91, 241))
@@ -219,8 +234,8 @@ class Ui_Form(QtWidgets.QMainWindow):
 		usig = self.inboxTable.selectedItems()[0].data(QtCore.Qt.UserRole)
 		print("Querying {}...".format(usig[:50]))
 		self.cursor.execute("""SELECT message FROM inbox WHERE uuid=?""",(usig,))
-		message_var = self.cursor.fetchone()[0]
-		if message_var:
+		message_var = (self.cursor.fetchone() or [None])[0]
+		if message_var != None:
 			self.webView.setHtml(message_var.decode("utf8"))
 		else:
 			self.webView.setHtml("<h1>Error</h1><p>An error occured while loading the message</p>")
@@ -257,9 +272,16 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.add_message_to_listview(uuid, timestamp, channel, payload)
 
 	def sendmessage(self):
-		msg = Message(payload=self.textEdit.toPlainText().encode("utf8"), ttl=120)
-		self.stolas.message_broadcast(msg)
-		self.textEdit.clear()
+		text = self.textEdit.toPlainText()
+		print("Lentext: ", len(text))
+		reply = QMessageBox.Yes
+		if len(text) == 0:
+			reply = dialog = QMessageBox.question(self, "Empty Message", "Are you sure you want to send an empty message?", QMessageBox.Yes | QMessageBox.No)
+
+		if reply == QMessageBox.Yes:
+			msg = Message(payload=text.encode("utf8"), ttl=120)
+			self.stolas.message_broadcast(msg)
+			self.textEdit.clear()
 
 	def retranslateUi(self):
 		Form.setWindowTitle(_translate("Form", "Form", None))
