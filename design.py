@@ -80,6 +80,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.central = QtWidgets.QWidget(None)
 		self.setObjectName(_fromUtf8("Form"))
 		self.resize(1000, 800)
+		self.setWindowIcon(QIcon("icon64.png"))
 		self.main_layout = QGridLayout(self.central)
 		#self.setLayout(self.main_layout)
 		self.webView = QtWebEngineWidgets.QWebEngineView()
