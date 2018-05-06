@@ -43,7 +43,7 @@ class UnisocketModel:
 		self.port = port
 		self.listen = kwargs.get("listen", True)
 		if self.listen:
-			self.listen_addr = "127.0.0.1" # Will change later
+			self.listen_addr = kwargs.get("bind", "127.0.0.1")
 		self.name = kwargs.get("name", None)
 		if self.name == None:
 			self.name = hex(random.randrange(7800000,78000000))[2:10]

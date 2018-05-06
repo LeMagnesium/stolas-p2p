@@ -14,7 +14,6 @@ from stolas.unisocket import UnisocketModel, i2b, b2i, PhantomLogger
 randport = lambda: random.randrange(1024, 65536)
 
 class MessagePile:
-	on_add_callbacks = []
 	def __init__(self):
 		"""Initialize the Message Stack object. Needs no parameters."""
 		self.data = {}
@@ -34,9 +33,6 @@ class MessagePile:
 	def __len__(self):
 		return len(self.data)
 
-	def register_on_add(self, func):
-		self.on_add_callbacks.append(func)
-
 	def add(self, message):
 		"""Add a message onto the pile. Expects a stolas.protocol.Message object."""
 		if message == None or not isinstance(message, protocol.Message):
@@ -51,8 +47,6 @@ class MessagePile:
 			nmid = self.__new_msgid()
 			self.data[nmid] = message
 			self.__lock.release()
-			for callback in self.on_add_callbacks:
-				callback(message)
 			return nmid
 
 	def get(self, message_id, alternative = None):
@@ -90,6 +84,7 @@ class MessagePile:
 				self.delete(mid)
 
 class Stolas:
+	on_new_message_callbacks = []
 	def __init__(self, **kwargs):
 		self.port = kwargs.get("port", randport())
 		self.running = False
@@ -98,14 +93,21 @@ class Stolas:
 			self.name = hex(random.randrange(pow(16,8),pow(16,16)))[2:10]
 
 		if kwargs.get("logging", False):
-			self.__logging_setup()
+			self.logger = self.__logging_setup("Stolas(" + self.name + ")")
 		else:
 			self.logger = PhantomLogger()
 
+		networker_kwargs = {}
 		if kwargs.get("logdown", False):
-			self.networker = UnisocketModel(self.port, name = "US," + self.name, logger = self.logger)
-		else:
-			self.networker = UnisocketModel(self.port, name = "US," + self.name)
+			logger = self.logger
+			if kwargs.get("logging", False) == False:
+				logger = self.__logging_setup("US," + self.name)
+			networker_kwargs["logger"] = logger
+		networker_kwargs["name"] = "US," + self.name
+		networker_kwargs["listen"] = kwargs.get("listen", True)
+		networker_kwargs["bind"] = kwargs.get("bind", None)
+
+		self.networker = UnisocketModel(self.port, **networker_kwargs)
 
 		self.networker.start()
 
@@ -119,6 +121,9 @@ class Stolas:
 		self.mpile = MessagePile()
 		self.distribution_timer = 10
 
+		self.tuned_channels = [""]
+		self.inbox = {}
+
 	def __repr__(self):
 		return "Stolas(name='{0}',port='{1}')".format(self.name, self.port)
 
@@ -128,7 +133,7 @@ class Stolas:
 		if getattr(self, "mpile", None) != None:
 			del self.mpile
 
-	def __logging_setup(self):
+	def __logging_setup(self, name = ""):
 		logfile = "stolas_logs"
 
 		if os.name == "posix":
@@ -146,21 +151,22 @@ class Stolas:
 
 		"""Internal. Setup logging and logging handlers."""
 		# Create a console handler
-		self.logger = logging.Logger("Stolas(" + self.name + ")")
+		logger = logging.Logger(name)
 		console = logging.StreamHandler()
 		console.setLevel(logging.CRITICAL)
 		c_formatter = logging.Formatter('%(message)s') # Keep it simple
 		console.setFormatter(c_formatter)
-		self.logger.addHandler(console)
+		logger.addHandler(console)
 
 		# Create the file handler.
 		file_lo = logging.handlers.RotatingFileHandler(filename = logfile)
 		file_lo.setLevel(logging.DEBUG)
 		f_formatter = logging.Formatter('[%(asctime)s][%(levelname)7s][%(name)20s:%(funcName)25s:%(lineno)3s][%(threadName)20s] %(message)s')
 		file_lo.setFormatter(f_formatter)
-		self.logger.addHandler(file_lo)
+		logger.addHandler(file_lo)
 
-		self.logger.debug("Logger Ready")
+		logger.debug("Logger Ready")
+		return logger
 
 	def stop(self):
 		self.running = False
@@ -176,6 +182,27 @@ class Stolas:
 
 	def is_alive(self):
 		return self.running
+
+	def register_on_new_message(self, func):
+		self.on_new_message_callbacks.append(func)
+
+	def save(self):
+		pass
+
+	def tune_in(self, channel = ""):
+		if type(channel) != type(""):
+			raise TypeError("Mismatched type of channel argument : {}, not 'str'".format(type(channel)))
+
+		if not channel in self.tuned_channels:
+			self.tuned_channels.append(channel)
+			self.inbox[channel] = {}
+			self.save()
+
+	def tune_out(self, channel):
+		if channel in self.tuned_channels:
+			self.tuned_channels.remove(channel)
+			del self.inbox[channel]
+			self.save()
 
 	def message_distribution(self):
 		self.distribution_timer = random.randrange(9,12)
@@ -216,6 +243,11 @@ class Stolas:
 				msg = protocol.Message.explode(message)
 				if not msg in self.mpile and msg.is_alive():
 					nmid = self.mpile.add(msg)
+					for callback in self.on_add_callbacks:
+						try:
+							callback(msg)
+						except: #FIXME More thourough handling later
+							pass
 					self.logger.info("Logged in message {0}".format(nmid))
 			self.networker.imessages.task_done()
 

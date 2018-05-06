@@ -1,0 +1,145 @@
+#!/usr/bin/python3
+
+# Welcome to Stolas
+
+import argparse
+import random
+import socket
+import time
+from stolas.protocol import Message
+
+def prompt(obj):
+	from stolas.betterui import pprint as print
+	print("~<s:bright]Welcome to Stolas v{}~<s:reset_all]")
+	while obj.is_alive() and obj.networker.is_alive():
+		try:
+			print("~<s:bright]", end = "")
+			command = input("[-]> ")
+			print("~<s:reset_all]", end = "", flush=True)
+		except Exception as err:
+			print("<~s:bright]<~f:red]" + str(err) + "<~s:reset_all]")
+			obj.running = False
+			continue
+
+		if command == "shutdown":
+			obj.running = False
+
+		csplit = command.split(" ")
+		if csplit[0] == "connect" and len(csplit) == 3 and csplit[2].isdecimal():
+			csplit[1] = socket.gethostbyname(csplit[1])
+			pid = obj.networker.peer_add((csplit[1], int(csplit[2])))
+			if type(pid) != type(0) and pid == False:
+				print("En error occured...")
+				continue
+			else:
+				print("Added peer {0} => PID {1}".format(csplit[1:3], pid))
+
+		elif csplit[0] == 'ppeers':
+			print(obj.networker.possible_peers)
+
+		elif csplit[0] == "broadcast" and len(csplit) > 1:
+			msgobj = Message()
+			msgobj.set_payload(" ".join(csplit[1:]).encode("utf8"))
+			msgobj.set_timestamp(time.time())
+			msgobj.set_ttl(70)
+			msgobj.set_channel("")
+
+			obj.message_broadcast(msgobj)
+
+		elif csplit[0] == "peers":
+			obj.networker.peerlock.acquire()
+			colors = ["red", "yellow", "green", "cyan", "blue", "magenta"]
+			col = random.randrange(0,len(colors))
+			for peer in sorted(list(obj.networker.peers.keys())):
+				print("~<s:bright]{0}~<s:reset_all] => ~<f:{1}]{2}~<s:reset_all]".format(
+					peer,
+					colors[col],
+					obj.networker.peers[peer].listen or obj.networker.peers[peer].verbinfo
+				))
+				col = (col+1)%len(colors)
+			obj.networker.peerlock.release()
+
+		elif csplit[0] == "fpeers":
+			obj.networker.peerlock.acquire()
+			for peer in [obj.networker.peers[peer] for peer in obj.networker.peers if obj.networker.peers[peer].listen != None]:
+				print("~<s:bright]{0}~<s:reset_all] => ~<s:bright]{1}~<s:reset_all]".format(peer.pid, peer.listen))
+			obj.networker.peerlock.release()
+
+		elif csplit[0] == "port":
+			print("Port is : {0}".format(obj.port))
+
+		elif csplit[0] == "messages":
+			print("Inbox:")
+			msgs = obj.mpile.list()
+			for mid in sorted(msgs):
+				msg = msgs[mid]
+				print("[{0}] {1}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(msg.timestamp)), msg.get_payload()))
+
+
+	print("Prompt terminated")
+	print("<[~]" + "-" * 40 + "[~]>")
+
+def parse_args(args):
+	kwargs = {}
+	if args.name:
+		kwargs["name"] = args.name
+
+	if args.port:
+		kwargs["port"] = args.port
+
+	if args.verbose == "gui":
+		kwargs["guilog"] = True
+		kwargs["logger"] = True
+		kwargs["logdown"] = True
+
+	elif args.verbose == "stolas":
+		kwargs["logger"] = kwargs["logdown"] = True
+
+	elif args.verbose == "unisocket":
+		kwargs["logdown"] = True
+
+	elif args.verbose == "guionly":
+		kwargs["guilog"] = True
+	elif args.verbose == "stolasonly":
+		kwargs["logger"] = True
+	elif args.verbose == "unisocketonly":
+		kwargs["logdown"] = True
+	return kwargs
+
+def main():
+	parser = argparse.ArgumentParser()
+	#parser.add_argument("--help", help="show help")
+	parser.add_argument("-c", "--headless", action="store_true", help="run stolas in headless mode")
+	parser.add_argument("-p", "--port", help="stolas binding port", type = int)
+	parser.add_argument("-v", "--verbose", help="define stolas log level", type=str, choices=["gui", "stolas", "unisocket", "guionly", "stolasonly", "unisocketonly"])
+	parser.add_argument("-n", "--name", help="name the stolas instance", type=str)
+	args = parser.parse_args()
+
+	kwargs = parse_args(args)
+
+	if args.headless:
+		from stolas import stolas
+		stolobj = stolas.Stolas(**kwargs)
+		stolobj.start()
+		try:
+			prompt(stolobj)
+		except KeyboardInterrupt:
+			pass
+		stolobj.stop()
+		stolobj.join()
+
+	else:
+		import stolas.gui
+		import sys
+		from PyQt5.QtWidgets import QApplication
+
+		app = QApplication(sys.argv)
+		interface = stolas.gui.StolasGUI()
+		interface.setupUi(**kwargs)
+		interface.show()
+		val = app.exec_()
+		interface.close_stolas()
+		sys.exit(val)
+
+if __name__ == "__main__":
+	main()

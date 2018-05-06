@@ -11,6 +11,8 @@ import sqlite3
 import os
 import os.path
 
+from pkg_resources import resource_filename
+
 try:
 	_fromUtf8 = QtCore.QString.fromUtf8
 except AttributeError:
@@ -59,9 +61,9 @@ class TitleFinder(HTMLParser):
 from stolas.stolas import Stolas
 from stolas.protocol import Message
 from stolas.utils import b2i, i2b
-class Ui_Form(QtWidgets.QMainWindow):
+class StolasGUI(QtWidgets.QMainWindow):
 	_storage_directory = find_storage_directory()
-	def setupUi(self):
+	def setupUi(self, **stolaskwargs):
 		# Here be database stuff
 		if not os.path.isdir(self._storage_directory):
 			os.mkdir(self._storage_directory)
@@ -80,44 +82,36 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.central = QtWidgets.QWidget(None)
 		self.setObjectName(_fromUtf8("Form"))
 		self.resize(1000, 800)
-		self.setWindowIcon(QIcon("icon64.png"))
+		self.enable_logs = stolaskwargs.get("guilog", False)
+		self.setWindowIcon(QIcon(resource_filename("stolas.resources.icons", "icon64.png")))
+		self.setWindowTitle("Stolas")
 		self.main_layout = QGridLayout(self.central)
-		#self.setLayout(self.main_layout)
+
 		self.webView = QtWebEngineWidgets.QWebEngineView()
-		#self.webView.setGeometry(QtCore.QRect(120, 10, 271, 241))
+
 		self.webView.setUrl(QtCore.QUrl(_fromUtf8("about:blank")))
 		self.webView.setObjectName(_fromUtf8("webView"))
 		self.pushButton = QPushButton("Send Message")
 		self.pushButton.setIcon(QIcon.fromTheme("document-send"))
-		#self.pushButton.setGeometry(QtCore.QRect(320, 260, 75, 31))
+
 		self.pushButton.setObjectName(_fromUtf8("pushButton"))
 		self.textEdit = QtWidgets.QTextEdit()
 		self.textEdit.setGeometry(QtCore.QRect(20, 260, 291, 31))
 		self.textEdit.setObjectName(_fromUtf8("textEdit"))
 		self.inboxTable = QtWidgets.QTableWidget()
-		#from PyQt5.QtWidgets import QSizePolicy
+
 		self.inboxTable.horizontalHeader().setStretchLastSection(True)
 		from PyQt5.QtWidgets import QAbstractItemView
 		self.inboxTable.setSelectionBehavior(QAbstractItemView.SelectRows)
 
 		self.pushButton.pressed.connect(self.sendmessage)
 
-		self.stolas = Stolas(logging=True, logdown=True)
+		self.stolas = Stolas(**stolaskwargs)
 		self.stolas.start()
-		self.stolas.networker.peer_add(("localhost", 62538))
-		print("Stolas connected")
-		print(self.stolas.networker.peers)
+		self.log("Stolas online")
 
 		self.destroyed.connect(self.close_stolas)
-		#self.aboutToQuit.connect(self.close_stolas)
 
-		"""self.main_layout.addWidget(self.pushButton, 3, 0)
-		#self.main_layout.addWidget(self.pushButton)
-		self.main_layout.addWidget(self.textEdit, 0, 1)
-		self.main_layout.addWidget(self.inboxTable, 0, 0, 3, 1)
-		#self.main_layout.addWidget(self.inboxList)
-		self.main_layout.addWidget(self.webView, 1, 1, 2, 2)
-		#self.main_layout.addWidget(self.webView)"""
 		splitver = QSplitter()
 		splitver.setOrientation(QtCore.Qt.Vertical)
 		splitver.addWidget(self.textEdit)
@@ -130,14 +124,18 @@ class Ui_Form(QtWidgets.QMainWindow):
 
 		self.create_menubar()
 		self.create_list_view()
-		self.stolas.mpile.register_on_add(lambda x: self.on_new_message(x))
-		print("Hook registration complete")
+		self.stolas.register_on_new_message(lambda x: self.on_new_message(x))
+		self.log("Hook registration complete")
 
 		#self.retranslateUi()
 		self.setCentralWidget(self.central)
-		print("Central Widget set")
+		self.log("Central Widget set")
 		QtCore.QMetaObject.connectSlotsByName(self)
-		print("Initialization complete")
+		self.log("Initialization complete")
+
+	def log(self, msg = "", **kwargs):
+		if self.enable_logs:
+			print(msg, **kwargs)
 
 	def create_menubar(self):
 		#self.menubar = QtWidgets.QMenuBar(self)
@@ -184,7 +182,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 
 		if textenter[1]:
 			self.stolas.networker.peer_add((textenter[0].split(",")[0], int(textenter[0].split(",")[1])))
-			print("Added")
+			self.log("Added")
 
 	def delete_current_item_from_listview(self):
 		reply = QMessageBox.question(self, "Message Deletion", "Are you sure you want to permanently remove those message?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
@@ -197,7 +195,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 		for item in select.selectedRows():
 			uuid = self.inboxTable.item(item.row(), 0).data(QtCore.Qt.UserRole)
 			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
-			print("Removing", uuid)
+			self.log("Removing {}...".format(uuid[:50]))
 
 		self.conn.commit()
 
@@ -217,14 +215,11 @@ class Ui_Form(QtWidgets.QMainWindow):
 		for i in range(3):
 			self.inboxTable.insertColumn(i)
 		self.inboxTable.setHorizontalHeaderLabels(["Channel", "Date", "Title"])
-		#self.inboxTable.setSelectionBehaviour(QAbstractItemView.SelectItems);
-		#self.inboxTable.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
 		self.cursor.execute("""SELECT uuid, timestamp, channel, message FROM inbox""")
 		for row in self.cursor.fetchall():
 			self.add_message_to_listview(row[0], row[1], row[2], row[3])
 		# Signals & Slots
 		self.inboxTable.itemSelectionChanged.connect(self.show_message)
-		pass
 
 	def show_message(self):
 		if len(self.inboxTable.selectedItems()) == 0:
@@ -233,7 +228,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 			return
 
 		usig = self.inboxTable.selectedItems()[0].data(QtCore.Qt.UserRole)
-		print("Querying {}...".format(usig[:50]))
+		self.log("Querying {}...".format(usig[:50]))
 		self.cursor.execute("""SELECT message FROM inbox WHERE uuid=?""",(usig,))
 		message_var = (self.cursor.fetchone() or [None])[0]
 		if message_var != None:
@@ -245,7 +240,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 		self.stolas.stop()
 
 	def add_message_to_listview(self, usig, timestamp, channel, payload):
-		print("Adding {}...".format(usig[:50]))
+		self.log("Adding {}...".format(usig[:50]))
 		row = self.inboxTable.rowCount()
 		self.inboxTable.insertRow(row)
 
@@ -274,7 +269,7 @@ class Ui_Form(QtWidgets.QMainWindow):
 
 	def sendmessage(self):
 		text = self.textEdit.toPlainText()
-		print("Lentext: ", len(text))
+		self.log("Lentext: ", len(text))
 		reply = QMessageBox.Yes
 		if len(text) == 0:
 			reply = dialog = QMessageBox.question(self, "Empty Message", "Are you sure you want to send an empty message?", QMessageBox.Yes | QMessageBox.No)
@@ -285,18 +280,15 @@ class Ui_Form(QtWidgets.QMainWindow):
 			self.textEdit.clear()
 
 	def retranslateUi(self):
-		Form.setWindowTitle(_translate("Form", "Form", None))
-		self.pushButton.setText(_translate("Form", "PushButton", None))
+		pass
 
 
 if __name__ == "__main__":
 	import sys
 	app = QApplication(sys.argv)
-	gui = Ui_Form()
+	gui = StolasGUI()
 	gui.setupUi()
-	print("Done")
 	gui.show()
-	print("Shown")
 	val = app.exec_()
 	gui.close_stolas()
 	sys.exit(val)
