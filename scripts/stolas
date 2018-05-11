@@ -6,11 +6,12 @@ import argparse
 import random
 import socket
 import time
+import stolas
 from stolas.protocol import Message
 
 def prompt(obj):
 	from stolas.betterui import pprint as print
-	print("~<s:bright]Welcome to Stolas v{}~<s:reset_all]")
+	print("~<s:bright]Welcome to Stolas v{}~<s:reset_all]".format(stolas.__version__))
 	while obj.is_alive() and obj.networker.is_alive():
 		try:
 			print("~<s:bright]", end = "")
@@ -37,12 +38,12 @@ def prompt(obj):
 		elif csplit[0] == 'ppeers':
 			print(obj.networker.possible_peers)
 
-		elif csplit[0] == "broadcast" and len(csplit) > 1:
+		elif csplit[0] == "broadcast" and len(csplit) > 2:
 			msgobj = Message()
-			msgobj.set_payload(" ".join(csplit[1:]).encode("utf8"))
+			msgobj.set_payload(" ".join(csplit[2:]).encode("utf8"))
 			msgobj.set_timestamp(time.time())
 			msgobj.set_ttl(70)
-			msgobj.set_channel("")
+			msgobj.set_channel(csplit[1])
 
 			obj.message_broadcast(msgobj)
 
@@ -69,11 +70,15 @@ def prompt(obj):
 			print("Port is : {0}".format(obj.port))
 
 		elif csplit[0] == "messages":
-			print("Inbox:")
+			print("Message Pile :")
 			msgs = obj.mpile.list()
 			for mid in sorted(msgs):
 				msg = msgs[mid]
-				print("[{0}] {1}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(msg.timestamp)), msg.get_payload()))
+				print("[{0}|{1}] {2}".format(time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(msg.timestamp)), msg.get_channel(), msg.get_payload()))
+
+		elif csplit[0] == "inbox":
+#			for channel in self.
+			pass
 
 
 	print("Prompt terminated")

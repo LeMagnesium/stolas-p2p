@@ -157,7 +157,7 @@ class Message:
 
 	def set_ttl(self, ttl):
 		"""Sets the Time To Live. Checks whether or not it is valid beforehand."""
-		if not type(ttl) in map(type, [int(), float()]):
+		if not type(ttl) in [int, float]:
 			raise TypeError("TTL should be provided as a number")
 
 		ttl = int(ttl)

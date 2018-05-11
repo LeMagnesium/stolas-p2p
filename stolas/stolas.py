@@ -4,6 +4,7 @@ import threading
 import queue
 import random
 import time
+import sqlite3
 import os, os.path
 import logging			# `logging.Logger`, `logging.Formatter`, `logging.StreamHandler`
 import logging.handlers	# `logging.handlers.RotatingFileHandler`
@@ -32,6 +33,10 @@ class MessagePile:
 
 	def __len__(self):
 		return len(self.data)
+
+	def __iter__(self):
+		for usig in self.data:
+			yield usig, self.data[usig]
 
 	def add(self, message):
 		"""Add a message onto the pile. Expects a stolas.protocol.Message object."""
@@ -83,8 +88,86 @@ class MessagePile:
 			if msg and not msg.is_alive():
 				self.delete(mid)
 
+def find_storage_directory():
+	if os.name == "nt":
+		# Use env
+		return os.environ.get("APPDATA", "") + os.sep + "Stolas"
+	elif os.name == "posix":
+		return os.environ.get("HOME", "") + os.sep + ".stolas"
+	else:
+		#TODO: Do other platforms
+		return ""
+
+class Inbox:
+	data = {}
+	_storage_directory = find_storage_directory()
+	_callbacks = []
+	def __init__(self):
+		# Here be database stuff
+		if not os.path.isdir(self._storage_directory):
+			os.mkdir(self._storage_directory)
+		self._db_open()
+		self._load()
+
+	def __iter__(self):
+		for usig in self.data:
+			yield usig, self.data[usig]
+
+	def _db_open(self):
+		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
+		self.cursor = self.conn.cursor()
+		self.cursor.execute('''CREATE TABLE IF NOT EXISTS inbox(
+		    uuid TEXT PRIMARY KEY,
+		    timestamp INT,
+			channel TEXT,
+			payload BLOB
+			)''')
+		self.conn.commit()
+
+	def _load(self):
+		self.cursor.execute("""SELECT uuid, timestamp, channel, payload FROM inbox""")
+		for row in self.cursor.fetchall():
+			data = dict(zip(["timestamp", "channel", "payload"], row[1:]))
+			self.data[row[0]] = data
+			for callback in self._callbacks:
+				callback(row[0], msg)
+
+	def save(self):
+		self.conn.commit()
+
+	def exists(self, uuid):
+		return self.data.get(uuid, None) != None
+
+	def remove(self, uuid):
+		if self.exists(uuid):
+			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
+			self.save()
+
+	def add(self, uuid, msg):
+		self.data[uuid] = msg
+		self.cursor.execute("""
+			INSERT INTO inbox(uuid, timestamp, channel, payload)
+			VALUES(?, ?, ?, ?)""",(
+				uuid,
+				msg["timestamp"],
+				msg["channel"],
+				msg["payload"]
+			)
+		)
+
+		for callback in self._callbacks:
+			callback(uuid, msg)
+		self.save()
+
+	def get(self, uuid, other=None):
+		return self.data.get(uuid, other)
+
 class Stolas:
 	on_new_message_callbacks = []
+	on_channel_tune_in_callbacks = []
+	on_channel_tune_out_callbacks = []
+	on_add_peer_callbacks = []
+	on_del_peer_callbacks = []
 	def __init__(self, **kwargs):
 		self.port = kwargs.get("port", randport())
 		self.running = False
@@ -122,7 +205,7 @@ class Stolas:
 		self.distribution_timer = 10
 
 		self.tuned_channels = [""]
-		self.inbox = {}
+		self.inbox = Inbox()
 
 	def __repr__(self):
 		return "Stolas(name='{0}',port='{1}')".format(self.name, self.port)
@@ -184,7 +267,13 @@ class Stolas:
 		return self.running
 
 	def register_on_new_message(self, func):
-		self.on_new_message_callbacks.append(func)
+		self.inbox._callbacks.append(func)
+
+	def register_on_channel_tune_in(self, func):
+		self.on_channel_tune_in_callbacks.append(func)
+
+	def register_on_channel_tune_out(self, func):
+		self.on_channel_tune_out_callbacks.append(func)
 
 	def save(self):
 		pass
@@ -195,17 +284,24 @@ class Stolas:
 
 		if not channel in self.tuned_channels:
 			self.tuned_channels.append(channel)
-			self.inbox[channel] = {}
+			#self.inbox[channel] = {}
 			self.save()
+			for callback in self.on_channel_tune_in_callbacks:
+				callback(channel)
+			for usig, message in self.mpile:
+				if message.channel == channel:
+					self.__add_in_inbox(message)
 
 	def tune_out(self, channel):
-		if channel in self.tuned_channels:
+		if channel != "" and channel in self.tuned_channels:
 			self.tuned_channels.remove(channel)
-			del self.inbox[channel]
+			#del self.inbox[channel]
 			self.save()
+			for callback in self.on_channel_tune_out_callbacks:
+				callback(channel)
 
 	def message_distribution(self):
-		self.distribution_timer = random.randrange(9,12)
+		self.distribution_timer = random.randrange(5,10)
 		randomly_selected_message = self.mpile.get_random()
 		if not randomly_selected_message:
 			return
@@ -241,19 +337,47 @@ class Stolas:
 			if mtype == "message":
 				# Create the message by exploding the binary blob
 				msg = protocol.Message.explode(message)
-				if not msg in self.mpile and msg.is_alive():
-					nmid = self.mpile.add(msg)
-					for callback in self.on_add_callbacks:
-						try:
-							callback(msg)
-						except: #FIXME More thourough handling later
-							pass
-					self.logger.info("Logged in message {0}".format(nmid))
+				self.handle_new_message(msg)
 			self.networker.imessages.task_done()
 
 		self.logger.info("Shutting down CPU")
 
+	def __add_in_inbox(self, msgobj):
+		if msgobj.channel in self.tuned_channels and not self.inbox.get(msgobj.usig(), False):
+			msg = {
+				"timestamp":	msgobj.get_timestamp(),
+				"channel":		msgobj.get_channel(),
+				"payload":		msgobj.get_payload()
+			}
+			self.inbox.add(msgobj.usig(), msg) #FIXME maybe we don't need it all
+
+	def handle_new_message(self, msgobj):
+		if not msgobj.is_alive():
+			return
+
+		if not msgobj in self.mpile:
+			mid = self.mpile.add(msgobj)
+			self.logger.info("Logged in message {0}".format(mid))
+
+		self.__add_in_inbox(msgobj)
+
+	def send_message(self, channel, payload, ttl = 120):
+		if len(payload) == 0:
+			return False
+		msgobj = protocol.Message(channel = channel, payload = payload, ttl = ttl)
+		payload_len = i2b(len(payload), 3)
+		if payload_len == b"\0\0":
+			return False
+
+		self.networker.peerlock.acquire()
+		for peerid in self.networker.peers:
+			self.networker.peer_send(peerid, protocol.MESSAGE_BYTE, payload_len + payload)
+		self.networker.peerlock.release()
+
+		self.handle_new_message(msgobj)
+
 	def message_broadcast(self, msgobj):
+		#FIXME : Is only kept for backwards compatibility
 		data = msgobj.implode()
 
 		payload_len = i2b(len(data), 3)

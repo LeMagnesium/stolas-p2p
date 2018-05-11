@@ -3,11 +3,11 @@ ctypes.CDLL("libGL.so.1", mode=ctypes.RTLD_GLOBAL)
 
 from PyQt5 import QtCore, QtGui , QtWidgets , QtWebEngineWidgets
 
+from PyQt5.QtWidgets import QInputDialog
 from PyQt5.QtWidgets import QMessageBox, QAbstractScrollArea, QWidget, QGridLayout, QPushButton, QApplication, QLineEdit, QMenu, QAction, QSplitter
 from PyQt5.QtGui import QIcon
 
 import time
-import sqlite3
 import os
 import os.path
 
@@ -27,16 +27,6 @@ try:
 except AttributeError:
 	def _translate(context, text, disambig):
 		return QApplication.translate(context, text, disambig)
-
-def find_storage_directory():
-	if os.name == "nt":
-		# Use env
-		return os.environ.get("APPDATA", "") + os.sep + "Stolas"
-	elif os.name == "posix":
-		return os.environ.get("HOME", "") + os.sep + ".stolas"
-	else:
-		#TODO: Do other platforms
-		return ""
 
 from html.parser import HTMLParser
 class TitleFinder(HTMLParser):
@@ -58,63 +48,86 @@ class TitleFinder(HTMLParser):
 			self.title_found = data
 			self.seeking_title = False
 
+class QHorizontalLine(QtWidgets.QFrame):
+	def __init__(self, **kwargs):
+		super().__init__(self, **kwargs)
+		self.setFrameShape(QtWidgets.QFrame.HLine)
+		self.setFrameShadow(QtWidgets.QFrame.Sunken)
+
+class QVerticalLine(QtWidgets.QFrame):
+	def __init__(self, **kwargs):
+		super().__init__(self, **kwargs)
+		self.setFrameShape(QtWidgets.QFrame.VLine)
+		self.setFrameShadow(QtWidgets.QFrame.Sunken)
+
 from stolas.stolas import Stolas
 from stolas.protocol import Message
 from stolas.utils import b2i, i2b
 class StolasGUI(QtWidgets.QMainWindow):
-	_storage_directory = find_storage_directory()
 	def setupUi(self, **stolaskwargs):
-		# Here be database stuff
-		if not os.path.isdir(self._storage_directory):
-			os.mkdir(self._storage_directory)
 
-		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
-		self.cursor = self.conn.cursor()
-		self.cursor.execute('''CREATE TABLE IF NOT EXISTS inbox(
-		     uuid TEXT PRIMARY KEY,
-		     timestamp INT,
-			 channel TEXT,
-			 message BLOB
-			 )''')
-		self.conn.commit()
+		self.enable_logs = stolaskwargs.get("guilog", False)
+
+		self.stolas = Stolas(**stolaskwargs)
+		self.inbox = self.stolas.inbox
+		self.stolas.start()
+		self.log("Stolas online")
+		self.destroyed.connect(self.close_stolas)
 
 		# Qt Initialization
 		self.central = QtWidgets.QWidget(None)
 		self.setObjectName(_fromUtf8("Form"))
 		self.resize(1000, 800)
-		self.enable_logs = stolaskwargs.get("guilog", False)
 		self.setWindowIcon(QIcon(resource_filename("stolas.resources.icons", "icon64.png")))
 		self.setWindowTitle("Stolas")
 		self.main_layout = QGridLayout(self.central)
 
 		self.webView = QtWebEngineWidgets.QWebEngineView()
-
 		self.webView.setUrl(QtCore.QUrl(_fromUtf8("about:blank")))
 		self.webView.setObjectName(_fromUtf8("webView"))
+
 		self.pushButton = QPushButton("Send Message")
 		self.pushButton.setIcon(QIcon.fromTheme("document-send"))
-
 		self.pushButton.setObjectName(_fromUtf8("pushButton"))
+		self.pushButton.pressed.connect(self.sendmessage)
+
 		self.textEdit = QtWidgets.QTextEdit()
 		self.textEdit.setGeometry(QtCore.QRect(20, 260, 291, 31))
 		self.textEdit.setObjectName(_fromUtf8("textEdit"))
-		self.inboxTable = QtWidgets.QTableWidget()
 
+		self.ttlSpin = QtWidgets.QSpinBox()
+		self.ttlSpin.setPrefix("TTL:")
+		self.ttlSpin.setMaximumSize(self.ttlSpin.size()/2)
+		self.ttlSpin.setMinimum(60)
+		self.ttlSpin.setMaximum(223200)
+		self.ttlSpin.setValue(120)
+		self.ttlSpin.setSuffix(" secs")
+
+		self.chanLabel = QtWidgets.QLabel()
+		self.chanLabel.setText("Channel: ")
+		self.chanLabel.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
+		self.chanCombox = QtWidgets.QComboBox()
+		self.chanCombox.addItems(self.stolas.tuned_channels)
+		self.stolas.register_on_channel_tune_in((lambda x: self.chanCombox.addItem(x)))
+		self.stolas.register_on_channel_tune_out((lambda x: self.chanCombox.removeItem(self.chanCombox.findText(x))))
+
+		self.inboxTable = QtWidgets.QTableWidget()
 		self.inboxTable.horizontalHeader().setStretchLastSection(True)
+		self.inboxTable.horizontalHeader().setHighlightSections(False)
+		self.inboxTable.verticalHeader().setVisible(False)
 		from PyQt5.QtWidgets import QAbstractItemView
 		self.inboxTable.setSelectionBehavior(QAbstractItemView.SelectRows)
 
-		self.pushButton.pressed.connect(self.sendmessage)
-
-		self.stolas = Stolas(**stolaskwargs)
-		self.stolas.start()
-		self.log("Stolas online")
-
-		self.destroyed.connect(self.close_stolas)
-
 		splitver = QSplitter()
 		splitver.setOrientation(QtCore.Qt.Vertical)
+		datahor = QSplitter()
+		datahor.setOrientation(QtCore.Qt.Horizontal)
+		datahor.addWidget(self.ttlSpin)
+		datahor.addWidget(self.chanLabel)
+		datahor.addWidget(self.chanCombox)
 		splitver.addWidget(self.textEdit)
+		splitver.addWidget(datahor)
 		splitver.addWidget(self.webView)
 		splithor = QSplitter()
 		splithor.addWidget(self.inboxTable)
@@ -124,7 +137,10 @@ class StolasGUI(QtWidgets.QMainWindow):
 
 		self.create_menubar()
 		self.create_list_view()
-		self.stolas.register_on_new_message(lambda x: self.on_new_message(x))
+		self.stolas.register_on_new_message(
+			lambda x, y:
+				self.add_message_to_listview(x, y["timestamp"], y["channel"], y["payload"])
+		)
 		self.log("Hook registration complete")
 
 		#self.retranslateUi()
@@ -133,9 +149,9 @@ class StolasGUI(QtWidgets.QMainWindow):
 		QtCore.QMetaObject.connectSlotsByName(self)
 		self.log("Initialization complete")
 
-	def log(self, msg = "", **kwargs):
+	def log(self, *args, **kwargs):
 		if self.enable_logs:
-			print(msg, **kwargs)
+			print(*args, **kwargs)
 
 	def create_menubar(self):
 		#self.menubar = QtWidgets.QMenuBar(self)
@@ -165,16 +181,45 @@ class StolasGUI(QtWidgets.QMainWindow):
 
 		self.menuBar().addMenu(self.itemmenu)
 
+		self.chanmenu = QMenu(_fromUtf8("Channel"))
+		self.chanacts = {}
+
+		self.chanacts["tune_in"] = QAction(QIcon.fromTheme("network-transmit-receive"), _fromUtf8("Tune in..."))
+		self.chanacts["tune_in"].setShortcut(QtCore.Qt.Key_I | QtCore.Qt.ControlModifier)
+		self.chanacts["tune_in"].triggered.connect(self.channel_tune_in)
+		self.chanmenu.addAction(self.chanacts["tune_in"])
+
+		self.chanacts["tune_out"] = QAction(QIcon.fromTheme("network-error"), _fromUtf8("Tune out..."))
+		self.chanacts["tune_out"].setShortcut(QtCore.Qt.Key_O | QtCore.Qt.ControlModifier)
+		self.chanacts["tune_out"].triggered.connect(self.channel_tune_out)
+		self.chanacts["tune_out"].setEnabled(self.chanCombox.count() > 1)
+		self.chanmenu.addAction(self.chanacts["tune_out"])
+
+		self.menuBar().addMenu(self.chanmenu)
+
 
 		self.debugmenu = QMenu(_fromUtf8("Debug"))
 		self.debugacts = {}
 
-		self.debugacts["connect"] = QAction(QIcon.fromTheme("network-transmit-receive"), _fromUtf8("Connect to Peer..."))
+		self.debugacts["connect"] = QAction(QIcon.fromTheme("network-wireless"), _fromUtf8("Connect to Peer..."))
 		self.debugacts["connect"].setShortcut(QtCore.Qt.Key_C | QtCore.Qt.ControlModifier | QtCore.Qt.MetaModifier)
 		self.debugacts["connect"].triggered.connect(self.debug_connect_dialog)
 		self.debugmenu.addAction(self.debugacts["connect"])
 
 		self.menuBar().addMenu(self.debugmenu)
+
+	def channel_tune_in(self):
+		value, ok = QInputDialog.getText(self, _fromUtf8("Channel Tune In..."), _fromUtf8("What channel do you want to tune into?"), QLineEdit.Normal, "")
+		if ok:
+			self.stolas.tune_in(value)
+			self.chanCombox.setCurrentIndex(self.chanCombox.findText(value))
+			self.chanacts["tune_out"].setEnabled(True)
+
+	def channel_tune_out(self):
+		value, ok = QInputDialog.getItem(self, _fromUtf8("Channel Tune Out..."), _fromUtf8("What channel do you wish to tune out from?"), [x for x in self.stolas.tuned_channels if x != ""], 0, False)
+		if ok:
+			self.stolas.tune_out(value)
+			self.chanacts["tune_out"].setEnabled(self.chanCombox.count() > 1)
 
 	def debug_connect_dialog(self):
 		textenter = QtWidgets.QInputDialog.getText(self, _fromUtf8("Debug Peer Connect..."),
@@ -194,10 +239,8 @@ class StolasGUI(QtWidgets.QMainWindow):
 		# Delete from db
 		for item in select.selectedRows():
 			uuid = self.inboxTable.item(item.row(), 0).data(QtCore.Qt.UserRole)
-			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
+			self.inbox.remove(uuid)
 			self.log("Removing {}...".format(uuid[:50]))
-
-		self.conn.commit()
 
 		offset = 0
 		oldrow = -1
@@ -215,9 +258,8 @@ class StolasGUI(QtWidgets.QMainWindow):
 		for i in range(3):
 			self.inboxTable.insertColumn(i)
 		self.inboxTable.setHorizontalHeaderLabels(["Channel", "Date", "Title"])
-		self.cursor.execute("""SELECT uuid, timestamp, channel, message FROM inbox""")
-		for row in self.cursor.fetchall():
-			self.add_message_to_listview(row[0], row[1], row[2], row[3])
+		for uuid, msg in self.inbox:
+			self.add_message_to_listview(uuid, msg["timestamp"], msg["channel"], msg["payload"])
 		# Signals & Slots
 		self.inboxTable.itemSelectionChanged.connect(self.show_message)
 
@@ -229,10 +271,9 @@ class StolasGUI(QtWidgets.QMainWindow):
 
 		usig = self.inboxTable.selectedItems()[0].data(QtCore.Qt.UserRole)
 		self.log("Querying {}...".format(usig[:50]))
-		self.cursor.execute("""SELECT message FROM inbox WHERE uuid=?""",(usig,))
-		message_var = (self.cursor.fetchone() or [None])[0]
+		message_var = self.inbox.get(usig)
 		if message_var != None:
-			self.webView.setHtml(message_var.decode("utf8"))
+			self.webView.setHtml(message_var["payload"].decode("utf8"))
 		else:
 			self.webView.setHtml("<h1>Error</h1><p>An error occured while loading the message</p>")
 
@@ -254,29 +295,21 @@ class StolasGUI(QtWidgets.QMainWindow):
 		litem = QtWidgets.QTableWidgetItem(TitleFinder(payload.decode("utf8")).get_title_or_None())
 		self.inboxTable.setItem(row, 2, litem)
 
-	def on_new_message(self, message):
-		uuid = message.usig()
-		timestamp = message.get_timestamp()
-		channel = message.get_channel()
-		payload = message.get_payload()
-
-		# We can't use "self" because this is executed in another thread
-		conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
-		cursor = conn.cursor()
-		cursor.execute("""INSERT INTO inbox(uuid, timestamp, channel, message) VALUES(?, ?, ?, ?)""",(uuid, timestamp, channel, payload))
-		conn.commit()
-		self.add_message_to_listview(uuid, timestamp, channel, payload)
+		for item in [citem, titem, litem]:
+			item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable)
 
 	def sendmessage(self):
-		text = self.textEdit.toPlainText()
-		self.log("Lentext: ", len(text))
+		payload = self.textEdit.toPlainText().encode("utf8")
+		ttl = self.ttlSpin.value()
+		channel = self.chanCombox.currentText()
+
+		self.log("Lentext: ", len(payload))
 		reply = QMessageBox.Yes
-		if len(text) == 0:
+		if len(payload) == 0:
 			reply = dialog = QMessageBox.question(self, "Empty Message", "Are you sure you want to send an empty message?", QMessageBox.Yes | QMessageBox.No)
 
 		if reply == QMessageBox.Yes:
-			msg = Message(payload=text.encode("utf8"), ttl=120)
-			self.stolas.message_broadcast(msg)
+			self.stolas.send_message(channel, payload, ttl)
 			self.textEdit.clear()
 
 	def retranslateUi(self):
