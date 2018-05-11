@@ -113,6 +113,13 @@ class Inbox:
 		for usig in self.data:
 			yield usig, self.data[usig]
 
+	def _db_get(self):
+		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
+		self.cursor = self.conn.cursor()
+
+	def _db_close(self):
+		self.conn.close()
+
 	def _db_open(self):
 		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
 		self.cursor = self.conn.cursor()
@@ -123,14 +130,17 @@ class Inbox:
 			payload BLOB
 			)''')
 		self.conn.commit()
+		self.conn.close()
 
 	def _load(self):
+		self._db_get()
 		self.cursor.execute("""SELECT uuid, timestamp, channel, payload FROM inbox""")
 		for row in self.cursor.fetchall():
 			data = dict(zip(["timestamp", "channel", "payload"], row[1:]))
 			self.data[row[0]] = data
 			for callback in self._callbacks:
 				callback(row[0], msg)
+		self._db_close()
 
 	def save(self):
 		self.conn.commit()
@@ -140,11 +150,14 @@ class Inbox:
 
 	def remove(self, uuid):
 		if self.exists(uuid):
+			self._db_get()
 			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
 			self.save()
+			self._db_close()
 
 	def add(self, uuid, msg):
 		self.data[uuid] = msg
+		self._db_get()
 		self.cursor.execute("""
 			INSERT INTO inbox(uuid, timestamp, channel, payload)
 			VALUES(?, ?, ?, ?)""",(
@@ -158,6 +171,7 @@ class Inbox:
 		for callback in self._callbacks:
 			callback(uuid, msg)
 		self.save()
+		self._db_close()
 
 	def get(self, uuid, other=None):
 		return self.data.get(uuid, other)
