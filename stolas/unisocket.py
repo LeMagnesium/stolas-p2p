@@ -43,7 +43,7 @@ class UnisocketModel:
 		self.port = port
 		self.listen = kwargs.get("listen", True)
 		if self.listen:
-			self.listen_addr = kwargs.get("bind", "127.0.0.1")
+			self.listen_addr = kwargs.get("bind", "127.0.0.1") or "127.0.0.1"
 		self.name = kwargs.get("name", None)
 		if self.name == None:
 			self.name = hex(random.randrange(7800000,78000000))[2:10]
@@ -373,7 +373,7 @@ class UnisocketModel:
 	def __start_listen(self):
 		"""Internal. Creates and starts the listen thread after initializing the listen socket and setting some of its properties."""
 		# We initialize the socket here so that any error in binding/listening can be caught from in the main thread
-		self.listen_socket.bind(("", self.port))
+		self.listen_socket.bind((self.listen_addr, self.port))
 		self.listen_socket.listen(10)
 		self.listen_socket.settimeout(0)
 

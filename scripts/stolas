@@ -118,7 +118,11 @@ def main():
 	parser.add_argument("-p", "--port", help="stolas binding port", type = int)
 	parser.add_argument("-v", "--verbose", help="define stolas log level", type=str, choices=["gui", "stolas", "unisocket", "guionly", "stolasonly", "unisocketonly"])
 	parser.add_argument("-n", "--name", help="name the stolas instance", type=str)
+	parser.add_argument("-l", "--listen", action="store_true", help="listen on the given port/interface")
 	args = parser.parse_args()
+
+	if args.port != None:
+		args.listen = True
 
 	kwargs = parse_args(args)
 
