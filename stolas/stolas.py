@@ -106,19 +106,12 @@ class Inbox:
 		# Here be database stuff
 		if not os.path.isdir(self._storage_directory):
 			os.mkdir(self._storage_directory)
-		self._db_open()
-		self._load()
+		self.cursor = None
+		self.conn = None
 
 	def __iter__(self):
 		for usig in self.data:
 			yield usig, self.data[usig]
-
-	def _db_get(self):
-		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
-		self.cursor = self.conn.cursor()
-
-	def _db_close(self):
-		self.conn.close()
 
 	def _db_open(self):
 		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
@@ -129,18 +122,14 @@ class Inbox:
 			channel TEXT,
 			payload BLOB
 			)''')
-		self.conn.commit()
-		self.conn.close()
 
 	def _load(self):
-		self._db_get()
 		self.cursor.execute("""SELECT uuid, timestamp, channel, payload FROM inbox""")
 		for row in self.cursor.fetchall():
 			data = dict(zip(["timestamp", "channel", "payload"], row[1:]))
 			self.data[row[0]] = data
 			for callback in self._callbacks:
 				callback(row[0], msg)
-		self._db_close()
 
 	def save(self):
 		self.conn.commit()
@@ -150,14 +139,13 @@ class Inbox:
 
 	def remove(self, uuid):
 		if self.exists(uuid):
-			self._db_get()
 			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
 			self.save()
-			self._db_close()
 
 	def add(self, uuid, msg):
+		if self.data.get(uuid, False):
+			return
 		self.data[uuid] = msg
-		self._db_get()
 		self.cursor.execute("""
 			INSERT INTO inbox(uuid, timestamp, channel, payload)
 			VALUES(?, ?, ?, ?)""",(
@@ -171,7 +159,6 @@ class Inbox:
 		for callback in self._callbacks:
 			callback(uuid, msg)
 		self.save()
-		self._db_close()
 
 	def get(self, uuid, other=None):
 		return self.data.get(uuid, other)
@@ -323,6 +310,9 @@ class Stolas:
 
 	def __processor_unit(self):
 		self.now = time.time()
+		self.inbox._db_open()
+		self.inbox._load()
+		self.tasks = queue.Queue()
 		while self.running:
 			if not self.networker.running:
 				self.running = False
@@ -346,13 +336,24 @@ class Stolas:
 			try:
 				mtype, message = self.networker.imessages.get(timeout=0)
 			except queue.Empty:
-				continue
+				pass
+			else:
+				if mtype == "message":
+					open("/tmp/moo", "wb").write(message)
+					msg = protocol.Message.explode(message)
+					self.handle_new_message(msg)
+					self.networker.imessages.task_done()
 
-			if mtype == "message":
-				# Create the message by exploding the binary blob
-				msg = protocol.Message.explode(message)
-				self.handle_new_message(msg)
-			self.networker.imessages.task_done()
+			try:
+				mtype, data = self.tasks.get(timeout=0)
+			except queue.Empty:
+				pass
+			else:
+				if mtype == "inbox_add":
+					usig, msg = data
+					self.inbox.add(usig, msg)
+				elif mtype == "inbox_del":
+					self.inbox.remove(data)
 
 		self.logger.info("Shutting down CPU")
 
@@ -363,7 +364,11 @@ class Stolas:
 				"channel":		msgobj.get_channel(),
 				"payload":		msgobj.get_payload()
 			}
-			self.inbox.add(msgobj.usig(), msg) #FIXME maybe we don't need it all
+			# Send the message to the CPU thread
+			self.tasks.put(("inbox_add", (msgobj.usig(), msg)))
+
+	def remove_inbox_message(self, usig):
+		self.tasks.put(("inbox_del", usig))
 
 	def handle_new_message(self, msgobj):
 		if not msgobj.is_alive():
@@ -379,13 +384,14 @@ class Stolas:
 		if len(payload) == 0:
 			return False
 		msgobj = protocol.Message(channel = channel, payload = payload, ttl = ttl)
-		payload_len = i2b(len(payload), 3)
+		bmessage = msgobj.implode()
+		payload_len = i2b(len(bmessage), 3)
 		if payload_len == b"\0\0":
 			return False
 
 		self.networker.peerlock.acquire()
 		for peerid in self.networker.peers:
-			self.networker.peer_send(peerid, protocol.MESSAGE_BYTE, payload_len + payload)
+			self.networker.peer_send(peerid, protocol.MESSAGE_BYTE, payload_len + bmessage)
 		self.networker.peerlock.release()
 
 		self.handle_new_message(msgobj)

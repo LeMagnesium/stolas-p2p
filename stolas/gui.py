@@ -239,7 +239,7 @@ class StolasGUI(QtWidgets.QMainWindow):
 		# Delete from db
 		for item in select.selectedRows():
 			uuid = self.inboxTable.item(item.row(), 0).data(QtCore.Qt.UserRole)
-			self.inbox.remove(uuid)
+			self.stolas.remove_inbox_message(uuid)
 			self.log("Removing {}...".format(uuid[:50]))
 
 		offset = 0
