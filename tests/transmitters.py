@@ -25,7 +25,7 @@ def network_random(port, quantity = None):
 	for n in range(quantity):
 		while True:
 			try:
-				stols = stolas.stolas.Stolas(port = cport)
+				stols = stolas.stolas.Stolas(port = cport, virtual=True)
 				stols.start()
 				if len(ports) > 0:
 					rport = random.choice(ports)

@@ -102,18 +102,21 @@ class Inbox:
 	data = {}
 	_storage_directory = find_storage_directory()
 	_callbacks = []
-	def __init__(self):
+	def __init__(self, nowrite=False):
 		# Here be database stuff
 		if not os.path.isdir(self._storage_directory):
 			os.mkdir(self._storage_directory)
 		self.cursor = None
 		self.conn = None
+		self.nowrite = nowrite
 
 	def __iter__(self):
 		for usig in self.data:
 			yield usig, self.data[usig]
 
 	def _db_open(self):
+		if self.nowrite:
+			return
 		self.conn = sqlite3.connect(self._storage_directory + os.sep + "data.db")
 		self.cursor = self.conn.cursor()
 		self.cursor.execute('''CREATE TABLE IF NOT EXISTS inbox(
@@ -124,6 +127,8 @@ class Inbox:
 			)''')
 
 	def _load(self):
+		if self.nowrite:
+			return
 		self.cursor.execute("""SELECT uuid, timestamp, channel, payload FROM inbox""")
 		for row in self.cursor.fetchall():
 			data = dict(zip(["timestamp", "channel", "payload"], row[1:]))
@@ -132,17 +137,23 @@ class Inbox:
 				callback(row[0], msg)
 
 	def save(self):
+		if self.nowrite:
+			return
 		self.conn.commit()
 
 	def exists(self, uuid):
 		return self.data.get(uuid, None) != None
 
 	def remove(self, uuid):
+		if self.nowrite:
+			return
 		if self.exists(uuid):
 			self.cursor.execute('DELETE from inbox WHERE uuid=?', (uuid,))
 			self.save()
 
 	def add(self, uuid, msg):
+		if self.nowrite:
+			return
 		if self.data.get(uuid, False):
 			return
 		self.data[uuid] = msg
@@ -206,7 +217,10 @@ class Stolas:
 		self.distribution_timer = 10
 
 		self.tuned_channels = [""]
-		self.inbox = Inbox()
+		if kwargs.get("virtual"):
+			self.inbox = Inbox(nowrite=True)
+		else:
+			self.inbox = Inbox()
 
 	def __repr__(self):
 		return "Stolas(name='{0}',port='{1}')".format(self.name, self.port)
@@ -339,7 +353,6 @@ class Stolas:
 				pass
 			else:
 				if mtype == "message":
-					open("/tmp/moo", "wb").write(message)
 					msg = protocol.Message.explode(message)
 					self.handle_new_message(msg)
 					self.networker.imessages.task_done()

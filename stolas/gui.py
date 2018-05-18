@@ -225,7 +225,7 @@ class StolasGUI(QtWidgets.QMainWindow):
 		textenter = QtWidgets.QInputDialog.getText(self, _fromUtf8("Debug Peer Connect..."),
 			_fromUtf8("Enter Peer Tuple"), QLineEdit.Normal)
 
-		if textenter[1]:
+		if textenter[1] and "," in textenter:
 			self.stolas.networker.peer_add((textenter[0].split(",")[0], int(textenter[0].split(",")[1])))
 			self.log("Added")
 
