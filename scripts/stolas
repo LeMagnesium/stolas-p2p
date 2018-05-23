@@ -109,6 +109,13 @@ def parse_args(args):
 		kwargs["logger"] = True
 	elif args.verbose == "unisocketonly":
 		kwargs["logdown"] = True
+
+	if args.virtual:
+		kwargs["virtual"] = True
+	if args.listen:
+		kwargs["listen"] = args.listen #FIXME: Remove duplicity
+		kwargs["bind"] = args.listen
+
 	return kwargs
 
 def main():
@@ -119,6 +126,7 @@ def main():
 	parser.add_argument("-v", "--verbose", help="define stolas log level", type=str, choices=["gui", "stolas", "unisocket", "guionly", "stolasonly", "unisocketonly"])
 	parser.add_argument("-n", "--name", help="name the stolas instance", type=str)
 	parser.add_argument("-l", "--listen", action="store_true", help="listen on the given port/interface")
+	parser.add_argument("--virtual", action="store_true", help="run a 'virtual' stolas instance, that does not use a database")
 	args = parser.parse_args()
 
 	if args.port != None:
