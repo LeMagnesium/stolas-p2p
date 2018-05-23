@@ -113,8 +113,7 @@ def parse_args(args):
 	if args.virtual:
 		kwargs["virtual"] = True
 	if args.listen:
-		kwargs["listen"] = args.listen #FIXME: Remove duplicity
-		kwargs["bind"] = args.listen
+		kwargs["listen"] = args.listen #FIXME: Add binding
 
 	return kwargs
 

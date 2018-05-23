@@ -4,6 +4,12 @@ Primarily intended as an evolved school project, [Stolas](https://fr.wikipedia.o
 
 ![Stolas](stolas.svg)
 
-### Todo List
- - `stolas/betterui.py::pprint`	:	Creare multiple code handling and single-time parsing mechanic
- - `stolas/protocol.py` and `stolas/unisocket.py` : Discontinue the Death Sequence
+### Todo List (for the hypothetical future of the project)
+ - Save the MPile's content and the tuned in channels in the databse
+ - Enrich the graphical interface : add a tab which lists our connected peers in details, as well as a counter on the bottom part of the main frame
+ - Add a splash screen to display the logo, some licence info, authors, etc
+ - An "about" window
+ - Some translation systems for the UI
+ - A mean of signing messages cryptographically with an identity
+ - A mean of tuning into a channel by means of asymmetric key sharing
+ - etc..
